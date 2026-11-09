@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import math
 import re
 from itertools import pairwise
 from urllib.parse import quote
@@ -46,8 +45,33 @@ _TOKEN = re.compile(r"[a-z0-9]+")
 _CANDIDATE_LIMIT = 100
 _MAX_PROBE_TERMS = 12
 _MIN_ASSUMED_CORPUS = 200
-_PHRASE_BOOST = 1.5
 _MAX_PHRASE_TERMS = 10
+_MAX_VARIANT_TERMS = 8
+_VARIANT_RULES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
+    ("ies", 3, ("y", "ic", "ical")),
+    ("ions", 4, ("e", "ed", "ing")),
+    ("ion", 3, ("", "s", "e", "ed", "ing")),
+    ("ing", 3, ("", "e", "ion", "ions")),
+    ("ed", 2, ("", "e", "ion")),
+    ("es", 1, ("",)),
+    ("s", 1, ("",)),
+    ("ity", 3, ("", "e")),
+    ("ic", 2, ("al", "y")),
+    ("ly", 2, ("",)),
+    ("e", 0, ("d", "s")),
+)
+_QUANTITATIVE_QUESTION = re.compile(
+    r"\b(how much|how many|percentage|percent|ratio|margin|ebitda|revenue|revenues|income|cash|cost|costs|"
+    r"expense|expenses|profit|balance|amount|spend|spent|capex)\b"
+    r"|\b(tax rate|effective tax|interest rate|discount rate|exchange rate|inflation rate|growth rate)\b"
+)
+_QUANTITATIVE_RELEVANCE_WEIGHT = 0.5
+_NUMERIC_DENSITY_WEIGHT = 1.0
+_DOLLAR_DENSITY_WEIGHT = 1.0
+_STATEMENT_WEIGHT = 0.5
+_OPEN_RELEVANCE_WEIGHT = 0.8
+_OPENING_WEIGHT = 0.3
+_AGREEMENT_WEIGHT = 0.4
 
 # Boilerplate that FinanceBench-style prompts add around the actual question. It carries
 # no page-level evidence, and left in the query it would dilute term coverage.
@@ -357,8 +381,10 @@ async def search_pdf_pages(memory: object, question: str, limit: int = 10) -> tu
     sequence = _question_sequence(question)
     if not sequence:
         return ()
-    probes = await _probe_pages(memory, sequence)
-    return _witness_citations(probes, limit)
+    probes = await _probe_pages(memory, sequence, question)
+    if not probes:
+        return ()
+    return _rank_pages(probes, _probe_terms(tuple(dict.fromkeys(sequence))), question, limit)
 
 
 def _hit_key(hit: object) -> tuple[str, str, str, str]:
@@ -366,28 +392,32 @@ def _hit_key(hit: object) -> tuple[str, str, str, str]:
     return (reference.family, reference.artifact_id, hit.entry_id, hit.entry_version_id)
 
 
-async def _probe_pages(memory: object, sequence: tuple[str, ...]) -> list[tuple[float, list[object]]]:
-    """Probe single terms and adjacent question phrases, weighted by corpus rarity.
+async def _probe_pages(memory: object, sequence: tuple[str, ...], question: str) -> list[list[object]]:
+    """Probe the question through several independent lexical views.
 
-    A single long query is admitted only when a page covers a share of every term, which
-    buries the page that holds the one distinctive term. Probing term by term keeps those
-    pages reachable, while adjacent two-word probes preserve the question's own phrasing so
-    a page that carries the whole phrase outranks pages that merely repeat one word.
+    One long query is admitted only when a page covers a share of every term, which buries
+    the page that holds the one distinctive term. Term probes keep those pages reachable,
+    adjacent phrases preserve the question's own wording, word-form variants bridge the
+    inflection gap between question and report, and the whole question still contributes a
+    plain relevance view.
     """
 
-    queries: list[tuple[str, float]] = [(term, 1.0) for term in _probe_terms(tuple(dict.fromkeys(sequence)))]
-    queries.extend((phrase, _PHRASE_BOOST) for phrase in _adjacent_phrases(sequence))
+    terms = _probe_terms(tuple(dict.fromkeys(sequence)))
+    queries: list[str] = list(terms)
+    queries.extend(_adjacent_phrases(sequence))
+    for term in terms[:_MAX_VARIANT_TERMS]:
+        queries.extend(_variant_terms(term))
+    queries.append(question)
 
-    probes: list[tuple[float, list[object]]] = []
+    probes: list[list[object]] = []
     seen: set[str] = set()
-    for query, boost in queries:
-        if query in seen:
+    for query in queries:
+        if not query or query in seen:
             continue
         seen.add(query)
         hits = await _search_hits(memory, query)
-        if not hits:
-            continue
-        probes.append((_probe_weight(len(hits)) * boost, hits))
+        if hits:
+            probes.append(hits)
     return probes
 
 
@@ -403,37 +433,117 @@ async def _search_hits(memory: object, query: str) -> list[object]:
     return list(page.hits)
 
 
-def _probe_weight(document_frequency: int) -> float:
-    """Weight one probe by how narrowly it selects pages in this corpus."""
+def _rank_pages(
+    probes: list[list[object]],
+    terms: tuple[str, ...],
+    question: str,
+    limit: int,
+) -> tuple:
+    """Rank whole pages by how many probes witness them and what kind of page they are.
 
-    return math.log(1.0 + _MIN_ASSUMED_CORPUS / (1.0 + document_frequency))
-
-
-def _witness_citations(probes: list[tuple[float, list[object]]], limit: int) -> tuple:
-    """Rank pages by their strongest single-probe evidence position."""
+    A page's strongest witness position is accumulated reciprocally across probes, so a
+    page that several independent views reach outranks a page a single narrow probe put
+    first. Financial-statement pages are then preferred for quantitative questions, while
+    open questions favour pages whose opening lines carry the question's own terms.
+    """
 
     from powercontext.builtin.artifacts.memory.models import MemoryCitation
 
-    best: dict[tuple[str, str, str, str], tuple[float, object]] = {}
-    support: dict[tuple[str, str, str, str], float] = {}
-    for weight, hits in probes:
-        for rank, hit in enumerate(hits, start=1):
-            value = weight / rank
+    harmonic: dict[tuple[str, str, str, str], float] = {}
+    votes: dict[tuple[str, str, str, str], int] = {}
+    hits: dict[tuple[str, str, str, str], object] = {}
+    for probe in probes:
+        for rank, hit in enumerate(probe, start=1):
             key = _hit_key(hit)
-            support[key] = support.get(key, 0.0) + value
-            current = best.get(key)
-            if current is None or value > current[0]:
-                best[key] = (value, hit)
-    ordered = sorted(best, key=lambda key: (best[key][0], support[key]), reverse=True)
-    citations = [
+            hits.setdefault(key, hit)
+            harmonic[key] = harmonic.get(key, 0.0) + 1.0 / rank
+            votes[key] = votes.get(key, 0) + 1
+
+    strongest = max(harmonic.values()) or 1.0
+    term_set = frozenset(terms)
+    quantitative = bool(_QUANTITATIVE_QUESTION.search(question.casefold()))
+    scored: list[tuple[float, tuple[str, str, str, str]]] = []
+    for key, value in harmonic.items():
+        text = hits[key].text.casefold()
+        tokens = _TOKEN.findall(text)
+        total = max(len(tokens), 1)
+        relevance = value / strongest
+        if quantitative:
+            digits = sum(1 for token in tokens if token.isdigit())
+            score = (
+                _QUANTITATIVE_RELEVANCE_WEIGHT * relevance
+                + _NUMERIC_DENSITY_WEIGHT * (digits / total)
+                + _DOLLAR_DENSITY_WEIGHT * min(text.count("$") / 10.0, 1.0)
+                + _STATEMENT_WEIGHT * (1.0 if "consolidated statement" in text else 0.0)
+            )
+        else:
+            opening = " ".join(text.split()[:18])
+            opening_hits = sum(1 for term in term_set if term in opening) / max(len(term_set), 1)
+            score = (
+                _OPEN_RELEVANCE_WEIGHT * relevance
+                + _OPENING_WEIGHT * opening_hits
+                + _AGREEMENT_WEIGHT * min(votes[key] / 12.0, 1.0)
+            )
+        scored.append((score, key))
+    scored.sort(reverse=True)
+    return tuple(
         MemoryCitation(
-            memory_ref=best[key][1].memory_ref,
-            entry_id=best[key][1].entry_id,
-            entry_version_id=best[key][1].entry_version_id,
+            memory_ref=hits[key].memory_ref,
+            entry_id=hits[key].entry_id,
+            entry_version_id=hits[key].entry_version_id,
         )
-        for key in ordered[:limit]
-    ]
-    return tuple(citations)
+        for _score, key in scored[:limit]
+    )
+
+
+def _variant_terms(term: str) -> tuple[str, ...]:
+    """Return plausible inflected or derived forms of one question term.
+
+    The index matches whole tokens, so a question asking about "geographies" cannot reach
+    a report that says "geographic". These rewrites are generic English morphology, never
+    document-specific vocabulary.
+    """
+
+    if len(term) < 5 or term.isdigit() or not term.isalpha() or not term.isascii():
+        return ()
+    forms: list[str] = [term + "s", term + "ed", term + "ing", term + "ion"]
+    for suffix, stem_length, endings in _VARIANT_RULES:
+        if not term.endswith(suffix) or len(term) - stem_length < 3:
+            continue
+        stem = term[: len(term) - stem_length] if stem_length else term
+        forms = [stem + ending for ending in endings]
+        break
+    ordered = [form for form in dict.fromkeys(forms) if form != term and _plausible_form(form)]
+    return tuple(ordered[:4])
+
+
+def _plausible_form(form: str) -> bool:
+    if len(form) < 4 or not form.isalpha() or not form.isascii():
+        return False
+    if any(marker in form for marker in ("sss", "iys", "yy", "iing", "eed", "ionion", "ioned", "ioning")):
+        return False
+    return form.endswith((
+        "s",
+        "es",
+        "d",
+        "ed",
+        "ing",
+        "ion",
+        "ions",
+        "er",
+        "ers",
+        "ic",
+        "ical",
+        "al",
+        "y",
+        "ly",
+        "ity",
+        "ive",
+        "e",
+        "t",
+        "ce",
+        "de",
+    ))
 
 
 def _question_sequence(question: object) -> tuple[str, ...]:
