@@ -269,6 +269,7 @@ from powercontext.builtin.statistics import (
 )
 from powercontext.builtin.statistics.aggregation import aggregate_statistics
 from powercontext.builtin.tags import ArtifactTagSet, TagFilter, TagQuery, TagQueryPage, TagTarget
+from powercontext.builtin.triggers import SOURCE_WINDOW_TRIGGER_NAME
 from powercontext.builtin.work import (
     HANDOFF_BOUNDARY_SOURCE_KIND,
     HANDOFF_RECEIPT_SOURCE_KIND,
@@ -330,6 +331,12 @@ logger = logging.getLogger(__name__)
 _CONTEXT_TOPIC_EMBEDDING_TIMEOUT_SECONDS = 0.25
 
 _MEMORY_CAPTURE_STAGE = "memory.capture"
+
+# Which persistent Source cursor bounds each family's count window.
+_SOURCE_COUNT_BINDINGS = {
+    "memory": SOURCE_WINDOW_TRIGGER_NAME,
+    "topic-memory": TOPIC_MEMORY_SOURCE_WINDOW_BINDING,
+}
 _MEMORY_CAPTURE_SOURCE_COUNT = "powercontext.memory.capture.source_count"
 _MEMORY_SEARCH_STAGE = "memory.search"
 _MEMORY_SEARCH_REQUESTED_MODE = "powercontext.memory.search.requested_mode"
@@ -488,6 +495,7 @@ class ScopedSourceApplication:
                             span.set_attributes({_MEMORY_CAPTURE_SOURCE_COUNT: 1})
             except BaseValueConflictError as error:
                 raise SourceConflictError("identity", error.identity) from None
+            self._runtime.note_source_captured(self.scope_id)
             return SourceReceipt(
                 source_ref=SourceRef(source_type=record.source_type, source_id=record.source_id),
                 sequence=record.position,
@@ -504,6 +512,7 @@ class ScopedSourceApplication:
                 )
                 if span is not None:
                     span.set_attributes({_MEMORY_CAPTURE_SOURCE_COUNT: 1})
+            self._runtime.note_source_captured(self.scope_id)
             return SourceReceipt(source_ref=context.sources.catalog.as_ref(source), sequence=sequence)
 
 
@@ -563,7 +572,11 @@ class ScopedRecordApplication:
         /,
     ) -> ArtifactCreated:
         async with self._runtime._scope_operation(self.scope_id), self._runtime._locked(self.scope_id):
-            return await self._runtime._records().create_artifact(self.scope_id, family, write)
+            created = await self._runtime._records().create_artifact(self.scope_id, family, write)
+        # An Artifact write appends its own lineage-only Source identity, and that entry
+        # counts toward the same launch threshold as a captured Source.
+        self._runtime.note_source_captured(self.scope_id)
+        return created
 
     async def get_artifact(self, family: str, artifact_id: str, /) -> ArtifactRecord:
         async with self._runtime._scope_operation(self.scope_id):
@@ -646,13 +659,15 @@ class ScopedRecordApplication:
         /,
     ) -> ArtifactRecord:
         async with self._runtime._scope_operation(self.scope_id), self._runtime._locked(self.scope_id):
-            return await self._runtime._records().replace_artifact(
+            record = await self._runtime._records().replace_artifact(
                 self.scope_id,
                 family,
                 artifact_id,
                 expected_etag,
                 write,
             )
+        self._runtime.note_source_captured(self.scope_id)
+        return record
 
 
 class RecordApplication:
@@ -2979,6 +2994,9 @@ class BuiltinRuntime:
         capabilities: RuntimeCapabilities,
         code_service: CodeService | None = None,
         source_window_limit: int = 100,
+        source_count_thresholds: Mapping[str, int] | None = None,
+        source_count_probe: Callable[[str, str], Awaitable[int]] | None = None,
+        count_trigger_families: tuple[str, ...] | None = None,
         context_assembly_max_entries: int = 8,
         recall_sufficiency_policy: RecallSufficiencyPolicy | None = None,
         scope_cache_size: int = DEFAULT_SCOPE_CACHE_SIZE,
@@ -3036,6 +3054,13 @@ class BuiltinRuntime:
             raise _RuntimeConfigurationError("scope_cache_size")
         self._provider = provider
         self._capabilities = capabilities
+        self._scope_ids = scope_ids
+        self._source_count_thresholds = dict(source_count_thresholds or {})
+        self._source_count_probe = source_count_probe
+        self._count_trigger_families = count_trigger_families
+        self._count_trigger_tasks: set[asyncio.Task[Any]] = set()
+        self._count_trigger_locks: dict[str, asyncio.Lock] = {}
+        self._topic_count_last_pending: dict[str, int] = {}
         self._review_service = review_service
         self.profiles = profiles
         self.subject_sources = subject_sources
@@ -3267,6 +3292,7 @@ class BuiltinRuntime:
                 self._scheduler.pause()
             async with self._lifecycle:
                 self._closing = True
+                await self._stop_count_triggers()
                 await self._lifecycle.wait_for(lambda: self._active_operations == 0)
             if self.artifact_processing_supervisor is not None:
                 await self.artifact_processing_supervisor.close()
@@ -3285,6 +3311,102 @@ class BuiltinRuntime:
                 self._scheduler = None
             self._scope_cache.clear()
             self._closed = True
+
+    async def _stop_count_triggers(self) -> None:
+        tasks = tuple(self._count_trigger_tasks)
+        if not tasks:
+            return
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._count_trigger_tasks.clear()
+
+    def note_source_captured(self, scope_id: str) -> None:
+        """Schedule one count-threshold check after a Source journal append."""
+
+        if not self._source_count_thresholds or self._source_count_probe is None:
+            return
+        if self._closing or self._closed:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._run_count_trigger(scope_id))
+        self._count_trigger_tasks.add(task)
+        task.add_done_callback(self._count_trigger_tasks.discard)
+
+    def start_count_trigger_recovery(self) -> None:
+        """Resume accepted-but-unsuccessful count launches after startup."""
+
+        if not self._source_count_thresholds or self._source_count_probe is None or self._scope_ids is None:
+            return
+        if self._closing or self._closed:
+            return
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(self._recover_count_triggers())
+        self._count_trigger_tasks.add(task)
+        task.add_done_callback(self._count_trigger_tasks.discard)
+
+    async def _recover_count_triggers(self) -> None:
+        try:
+            scope_ids = await self._scope_ids()
+        except Exception as error:
+            log_safely(logger, logging.WARNING, "Count threshold recovery could not list scopes", exc_info=error)
+            return
+        for scope_id in scope_ids:
+            if self._closing or self._closed:
+                return
+            await self._run_count_trigger(scope_id)
+
+    async def _run_count_trigger(self, scope_id: str) -> None:
+        for family, threshold in tuple(self._source_count_thresholds.items()):
+            if not self._count_family_enabled(family):
+                continue
+            lock = self._count_trigger_locks.setdefault(f"{scope_id}:{family}", asyncio.Lock())
+            try:
+                async with lock:
+                    await self._drain_count_threshold(scope_id, family, threshold)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                log_safely(
+                    logger,
+                    logging.WARNING,
+                    "Count threshold launch failed",
+                    exc_info=error,
+                    extra={"event": "sources.count_threshold.failure", "family": family},
+                )
+
+    def _count_family_enabled(self, family: str) -> bool:
+        if self._count_trigger_families is not None and family not in self._count_trigger_families:
+            return False
+        if family == "topic-memory":
+            return self._topic_memory_processing_available
+        return family == "memory"
+
+    async def _count_pending(self, scope_id: str, binding: str) -> int:
+        if self._source_count_probe is None:
+            return 0
+        return await self._source_count_probe(scope_id, binding)
+
+    async def _drain_count_threshold(self, scope_id: str, family: str, threshold: int) -> None:
+        """Launch original processing while the pending count still meets the threshold."""
+
+        binding = _SOURCE_COUNT_BINDINGS[family]
+        pending = await self._count_pending(scope_id, binding)
+        if family == "topic-memory":
+            # One accepted wave keeps its own windowing; never re-apply the threshold to it.
+            if pending < threshold or pending == self._topic_count_last_pending.get(scope_id):
+                return
+            self._topic_count_last_pending[scope_id] = pending
+            await self.topic_memory.for_scope(scope_id).flush()
+            return
+        while pending >= threshold:
+            result = await self.memory.for_scope(scope_id).flush()
+            if not result.processed:
+                return
+            pending = await self._count_pending(scope_id, binding)
 
     @asynccontextmanager
     async def _operation(self) -> AsyncIterator[None]:
