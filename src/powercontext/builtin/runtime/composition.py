@@ -157,6 +157,7 @@ from powercontext.builtin.runtime.readiness import (
 )
 from powercontext.builtin.runtime.recall_sufficiency import RecallSufficiencyPolicy
 from powercontext.builtin.runtime.relational import RelationalContexts
+from powercontext.builtin.runtime.source_lifecycle import SourceLifecycleStore
 from powercontext.builtin.runtime.topic_memory_processing import (
     TopicMemoryWorkerSpec,
     run_topic_memory_worker,
@@ -621,6 +622,7 @@ async def open_builtin_runtime(
                 ),
                 source_window_limit=config.runtime.source_window_limit,
                 source_count_thresholds=source_count_thresholds,
+                source_lifecycle_store=SourceLifecycleStore(contexts.database),
                 source_count_probe=(
                     None if not source_count_thresholds else partial(_pending_source_count, contexts)
                 ),
