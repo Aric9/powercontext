@@ -354,6 +354,28 @@ def _configured_memory_write_gate(
     return gate
 
 
+def _source_count_thresholds(config: BuiltinConfig) -> dict[str, int]:
+    """Return the configured per-family launch thresholds, honouring the API-only role."""
+
+    if config.runtime.artifact_processing_role == "api":
+        return {}
+    thresholds: dict[str, int] = {}
+    if config.runtime.memory_source_count_threshold is not None:
+        thresholds["memory"] = config.runtime.memory_source_count_threshold
+    if config.runtime.topic_memory_source_count_threshold is not None:
+        thresholds["topic-memory"] = config.runtime.topic_memory_source_count_threshold
+    return thresholds
+
+
+async def _pending_source_count(contexts: RelationalContexts, scope_id: str, binding_name: str) -> int:
+    """Count persisted journal identities past one family's success cursor."""
+
+    async with contexts.database.transaction() as connection:
+        high_watermark = await contexts.repositories.sources.journal_position(connection, scope_id)
+        cursor = await contexts.repositories.cursors.load(connection, scope_id, binding_name)
+    return max(0, int(high_watermark) - (0 if cursor is None else cursor.cursor.sequence))
+
+
 @asynccontextmanager
 async def open_builtin_runtime(
     config: BuiltinConfig,
@@ -582,6 +604,7 @@ async def open_builtin_runtime(
                 if family in registered_families
             )
         topic_memory_processing_available = _topic_memory_processing_available(config, processing_bindings)
+        source_count_thresholds = _source_count_thresholds(config)
         runtime = await resources.enter_async_context(
             BuiltinRuntime(
                 code_service=await resources.enter_async_context(open_code_service(config.code, config.database)),
@@ -597,6 +620,11 @@ async def open_builtin_runtime(
                     prompts=dict(contexts.prompt_registry.capabilities),
                 ),
                 source_window_limit=config.runtime.source_window_limit,
+                source_count_thresholds=source_count_thresholds,
+                source_count_probe=(
+                    None if not source_count_thresholds else partial(_pending_source_count, contexts)
+                ),
+                count_trigger_families=config.runtime.artifact_processing_families,
                 context_assembly_max_entries=config.runtime.context_assembly_max_entries,
                 recall_sufficiency_policy=RecallSufficiencyPolicy.from_runtime_config(config.runtime),
                 scope_cache_size=config.runtime.scope_cache_size,
@@ -657,6 +685,7 @@ async def open_builtin_runtime(
         runtime.artifact_processing_supervisor = await resources.enter_async_context(
             _open_artifact_processing_supervisor(config, contexts, processing_bindings, tracing=tracing)
         )
+        runtime.start_count_trigger_recovery()
         contexts.profiles.operation_context = runtime._operation
         if config.handoff_report.enabled:
             runtime.handoff_report = HandoffReportApplication(
