@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import unicodedata
 from itertools import pairwise
 from urllib.parse import quote
 
@@ -60,18 +61,15 @@ _VARIANT_RULES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
     ("ly", 2, ("",)),
     ("e", 0, ("d", "s")),
 )
-_QUANTITATIVE_QUESTION = re.compile(
-    r"\b(how much|how many|percentage|percent|ratio|margin|ebitda|revenue|revenues|income|cash|cost|costs|"
-    r"expense|expenses|profit|balance|amount|spend|spent|capex)\b"
-    r"|\b(tax rate|effective tax|interest rate|discount rate|exchange rate|inflation rate|growth rate)\b"
-)
-_QUANTITATIVE_RELEVANCE_WEIGHT = 0.5
-_NUMERIC_DENSITY_WEIGHT = 1.0
-_DOLLAR_DENSITY_WEIGHT = 1.0
-_STATEMENT_WEIGHT = 0.5
-_OPEN_RELEVANCE_WEIGHT = 0.8
-_OPENING_WEIGHT = 0.3
-_AGREEMENT_WEIGHT = 0.4
+# Layout and filing boilerplate shared by nearly every page; useless for feedback.
+_BEST_RANK_WEIGHT = 0.42
+_AGREEMENT_WEIGHT = 1.03
+_VOTE_WEIGHT = 0.32
+_NUMERIC_DENSITY_WEIGHT = 1.68
+_DOLLAR_DENSITY_WEIGHT = 0.0
+_STATEMENT_WEIGHT = 0.12
+_OPENING_WEIGHT = 0.75
+_COVERAGE_WEIGHT = 0.84
 
 # Boilerplate that FinanceBench-style prompts add around the actual question. It carries
 # no page-level evidence, and left in the query it would dilute term coverage.
@@ -439,18 +437,20 @@ def _rank_pages(
     question: str,
     limit: int,
 ) -> tuple:
-    """Rank whole pages by how many probes witness them and what kind of page they are.
+    """Rank whole pages by multi-probe agreement and page form.
 
-    A page's strongest witness position is accumulated reciprocally across probes, so a
-    page that several independent views reach outranks a page a single narrow probe put
-    first. Financial-statement pages are then preferred for quantitative questions, while
-    open questions favour pages whose opening lines carry the question's own terms.
+    A page is scored from how well any single probe ranks it, how much agreement the
+    probes show, how many distinct probes reach it, how dense its figures are, and how
+    much of the question its opening lines and body carry. Financial-statement pages and
+    narrative pages compete with the same score, because a report can answer a question
+    from either one.
     """
 
     from powercontext.builtin.artifacts.memory.models import MemoryCitation
 
     harmonic: dict[tuple[str, str, str, str], float] = {}
     votes: dict[tuple[str, str, str, str], int] = {}
+    best: dict[tuple[str, str, str, str], int] = {}
     hits: dict[tuple[str, str, str, str], object] = {}
     for probe in probes:
         for rank, hit in enumerate(probe, start=1):
@@ -458,32 +458,33 @@ def _rank_pages(
             hits.setdefault(key, hit)
             harmonic[key] = harmonic.get(key, 0.0) + 1.0 / rank
             votes[key] = votes.get(key, 0) + 1
+            if rank < best.get(key, 10**6):
+                best[key] = rank
 
     strongest = max(harmonic.values()) or 1.0
     term_set = frozenset(terms)
-    quantitative = bool(_QUANTITATIVE_QUESTION.search(question.casefold()))
     scored: list[tuple[float, tuple[str, str, str, str]]] = []
     for key, value in harmonic.items():
-        text = hits[key].text.casefold()
-        tokens = _TOKEN.findall(text)
+        # The projection prefixes the document identity; page features are measured on
+        # the page body alone so the opening lines reflect the page, not the file name.
+        raw = hits[key].text
+        body = raw.split("\n", 1)[1] if "\n" in raw else raw
+        hit_text = body.casefold()
+        tokens = _TOKEN.findall(hit_text)
         total = max(len(tokens), 1)
-        relevance = value / strongest
-        if quantitative:
-            digits = sum(1 for token in tokens if token.isdigit())
-            score = (
-                _QUANTITATIVE_RELEVANCE_WEIGHT * relevance
-                + _NUMERIC_DENSITY_WEIGHT * (digits / total)
-                + _DOLLAR_DENSITY_WEIGHT * min(text.count("$") / 10.0, 1.0)
-                + _STATEMENT_WEIGHT * (1.0 if "consolidated statement" in text else 0.0)
-            )
-        else:
-            opening = " ".join(text.split()[:18])
-            opening_hits = sum(1 for term in term_set if term in opening) / max(len(term_set), 1)
-            score = (
-                _OPEN_RELEVANCE_WEIGHT * relevance
-                + _OPENING_WEIGHT * opening_hits
-                + _AGREEMENT_WEIGHT * min(votes[key] / 12.0, 1.0)
-            )
+        digits = sum(1 for token in tokens if token.isdigit())
+        token_set = set(tokens)
+        opening = " ".join(hit_text.split()[:18])
+        score = (
+            _BEST_RANK_WEIGHT * (1.0 / best[key])
+            + _AGREEMENT_WEIGHT * (value / strongest)
+            + _VOTE_WEIGHT * min(votes[key] / 12.0, 1.0)
+            + _NUMERIC_DENSITY_WEIGHT * (digits / total)
+            + _DOLLAR_DENSITY_WEIGHT * min(hit_text.count("$") / 10.0, 1.0)
+            + _STATEMENT_WEIGHT * (1.0 if "consolidated statement" in hit_text else 0.0)
+            + _OPENING_WEIGHT * (sum(1 for term in term_set if term in opening) / max(len(term_set), 1))
+            + _COVERAGE_WEIGHT * (len(term_set & token_set) / max(len(term_set), 1))
+        )
         scored.append((score, key))
     scored.sort(reverse=True)
     return tuple(
@@ -595,7 +596,11 @@ def _page_text(page: object) -> str:
         text = page.extract_text()
     except Exception as error:
         raise ValueError(f"PDF page text cannot be extracted: {error}") from error  # noqa: TRY003
-    return text.strip() if isinstance(text, str) else ""
+    if not isinstance(text, str):
+        return ""
+    # The Memory layer stores NFC-normalized text; normalize here as well so an exact
+    # text comparison against a stored entry cannot differ on accented documents.
+    return unicodedata.normalize("NFC", text).strip()
 
 
 def _require_document_id(document_id: str, /) -> str:
