@@ -248,6 +248,12 @@ from powercontext.builtin.runtime.recall_sufficiency import (
     build_recall_candidates,
     recall_effort,
 )
+from powercontext.builtin.runtime.source_lifecycle import (
+    SourceLifecycleError,
+    SourceLifecycleEvent,
+    SourceLifecycleService,
+    SourceLifecycleStore,
+)
 from powercontext.builtin.runtime.statistics import RelationalScopedStatistics, overview_selection
 from powercontext.builtin.scope import ScopeApplication, ScopeDescriptor, ScopeSelection
 from powercontext.builtin.scope.subject_sources import SubjectSourceService
@@ -525,6 +531,130 @@ class SourceApplication:
     def for_scope(self, scope_id: str, /) -> ScopedSourceApplication:
         return ScopedSourceApplication(self._runtime, scope_id)
 
+
+
+class ScopedSourceLifecycleApplication:
+    """Register evidence dependencies and propagate Source availability in one scope."""
+
+    def __init__(self, runtime: BuiltinRuntime, scope_id: str) -> None:
+        self._runtime = runtime
+        self.scope_id = validate_scope_id(scope_id)
+        store = runtime._source_lifecycle_store
+        if store is None:
+            raise _RuntimeStateError("source-lifecycle")
+        self._service = SourceLifecycleService(
+            store=store,
+            scope_id=self.scope_id,
+            memory_state=self._set_memory_state,
+            verify_source=self._verify_source,
+            verify_memory=self._verify_memory,
+            verify_topic=self._verify_topic,
+        )
+
+    async def register_source(self, node_id: str, source_ref: SourceRef, /, *, revision: int) -> None:
+        await self._service.register_source(node_id, source_ref, revision=revision)
+
+    async def register_memory(
+        self,
+        node_id: str,
+        citation: MemoryCitation,
+        /,
+        *,
+        parents: Sequence[str] = (),
+        policy: str = "all",
+    ) -> None:
+        await self._service.register_memory(node_id, citation, parents=parents, policy=policy)
+
+    async def register_topic(
+        self,
+        node_id: str,
+        artifact_ref: ArtifactRef,
+        /,
+        *,
+        parents: Sequence[str] = (),
+        policy: str = "all",
+    ) -> None:
+        await self._service.register_topic(node_id, artifact_ref, parents=parents, policy=policy)
+
+    async def apply(self, event: SourceLifecycleEvent, /) -> list[str]:
+        async with self._runtime._scoped_operation(self.scope_id):
+            return await self._service.apply(event)
+
+    async def resolve(
+        self,
+        node_id: str,
+        /,
+        *,
+        purpose: str,
+    ) -> SourceRef | MemoryCitation | ArtifactRef:
+        async with self._runtime._scoped_operation(self.scope_id):
+            return await self._service.resolve(node_id, purpose=purpose)
+
+    async def _verify_source(self, source_ref: SourceRef) -> None:
+        try:
+            await self._runtime.records.for_scope(self.scope_id).get_source(
+                source_ref.source_type, source_ref.source_id
+            )
+        except Exception as error:
+            raise SourceLifecycleError("source-reference") from error
+
+    async def _verify_topic(self, artifact_ref: ArtifactRef) -> None:
+        try:
+            await self._runtime.records.for_scope(self.scope_id).get_artifact_revision(
+                artifact_ref.family, artifact_ref.artifact_id, artifact_ref.revision
+            )
+        except Exception as error:
+            raise SourceLifecycleError("topic-reference") from error
+
+    async def _verify_memory(self, citation: MemoryCitation) -> None:
+        async with self._runtime._context(
+            self.scope_id,
+            embedding_purpose=ModelUsagePurpose.MEMORY_INDEXING,
+        ) as context:
+            service = context.artifacts.memory
+            current = await _head_or_none(service, context.artifacts.memory_artifact_id)
+            if current is None or not _citation_in_manifest(current, citation):
+                raise SourceLifecycleError("memory-reference")
+
+    async def _set_memory_state(self, citation: MemoryCitation, available: bool) -> None:
+        async with self._runtime._context(
+            self.scope_id,
+            embedding_purpose=ModelUsagePurpose.MEMORY_INDEXING,
+        ) as context, self._runtime._locked(self.scope_id):
+            service = context.artifacts.memory
+            current = await _head_or_none(service, context.artifacts.memory_artifact_id)
+            if current is None:
+                raise SourceLifecycleError("memory-missing")
+            manifest_entry = next(
+                (
+                    item
+                    for item in current.content.manifest.entries
+                    if item.entry_id == citation.entry_id
+                ),
+                None,
+            )
+            if manifest_entry is None or manifest_entry.entry_version_id != citation.entry_version_id:
+                raise SourceLifecycleError("memory-manifest")
+            target = "active" if available else "inactive"
+            if manifest_entry.state == target:
+                return
+            entry = next(
+                version
+                for version in await service.entries(current)
+                if version.entry_id == citation.entry_id
+            )
+            transition = service.reactivate if available else service.forget
+            await transition(current, entries=(entry,), reason="source lifecycle")
+
+
+class SourceLifecycleApplication:
+    """Select the scoped lifecycle service."""
+
+    def __init__(self, runtime: BuiltinRuntime) -> None:
+        self._runtime = runtime
+
+    def for_scope(self, scope_id: str, /) -> ScopedSourceLifecycleApplication:
+        return ScopedSourceLifecycleApplication(self._runtime, scope_id)
 
 class ScopedRecordApplication:
     """Run base Source and Artifact operations in one Scope."""
@@ -1490,6 +1620,37 @@ class ScopedContextApplication:
                 embedding_calls=result.embedding_calls,
             )
 
+
+def _widened_topic_request(
+    request: SearchTopicMemoryRequest,
+    withdrawn: int,
+) -> SearchTopicMemoryRequest:
+    """Over-fetch only when some Topic hits may be hidden by the lifecycle graph."""
+
+    if withdrawn < 1:
+        return request
+    return request.model_copy(
+        update={
+            "limit": min(MAX_TOPIC_MEMORY_SEARCH_LIMIT, request.limit + withdrawn),
+        }
+    )
+
+
+def _visible_topic_result(
+    result: TopicMemorySearchResult,
+    inactive: frozenset[tuple[str, int]],
+    limit: int,
+) -> TopicMemorySearchResult:
+    """Drop Topic Revisions that a lifecycle event withdrew and restore the limit."""
+
+    if not inactive:
+        return result
+    hits = tuple(
+        hit
+        for hit in result.hits
+        if (hit.artifact_ref.artifact_id, hit.artifact_ref.revision) not in inactive
+    )[:limit]
+    return result.model_copy(update={"hits": hits})
 
 def _limit_memory_candidates(
     candidates: list[PreparedMemoryCandidates],
@@ -2655,6 +2816,9 @@ class ScopedTopicMemoryApplication:
         if len(set(analyze_text(query).split())) > MAX_TOPIC_MEMORY_QUERY_TERMS:
             raise InvalidRuntimeRequestError("topic-memory-query-terms")
 
+        inactive_topics = await self._runtime._inactive_topic_refs(self.scope_id)
+        effective = _widened_topic_request(request, len(inactive_topics))
+
         used_fallback = False
         async with self._runtime._scoped_operation(
             self.scope_id,
@@ -2668,20 +2832,22 @@ class ScopedTopicMemoryApplication:
                 result = await search(
                     self.scope_id,
                     query,
-                    limit=request.limit,
+                    limit=effective.limit,
                     mode="fts",
                     **_admission_keyword(admission),
                 )
                 result = result.model_copy(update={"embedding_calls": 0})
             else:
                 result, used_fallback = await self._search_with_embedding(
-                    request,
+                    effective,
                     embedding,
                     search,
                     admission,
                     query_embedding,
                     embedding_timeout_seconds,
                 )
+        result = _visible_topic_result(result, inactive_topics, request.limit)
+
         observer = self._runtime._topic_memory_search_observer
         if observer is not None:
             try:
@@ -2995,6 +3161,7 @@ class BuiltinRuntime:
         code_service: CodeService | None = None,
         source_window_limit: int = 100,
         source_count_thresholds: Mapping[str, int] | None = None,
+        source_lifecycle_store: SourceLifecycleStore | None = None,
         source_count_probe: Callable[[str, str], Awaitable[int]] | None = None,
         count_trigger_families: tuple[str, ...] | None = None,
         context_assembly_max_entries: int = 8,
@@ -3056,6 +3223,7 @@ class BuiltinRuntime:
         self._capabilities = capabilities
         self._scope_ids = scope_ids
         self._source_count_thresholds = dict(source_count_thresholds or {})
+        self._source_lifecycle_store = source_lifecycle_store
         self._source_count_probe = source_count_probe
         self._count_trigger_families = count_trigger_families
         self._count_trigger_tasks: set[asyncio.Task[Any]] = set()
@@ -3136,6 +3304,7 @@ class BuiltinRuntime:
         self.memory = MemoryApplication(self)
         self.topic_memory = TopicMemoryApplication(self)
         self.records = RecordApplication(self)
+        self.lifecycle = SourceLifecycleApplication(self)
         self.prompts = PromptApplication(self)
         self.review = ReviewApplication(self)
         self.skill = SkillApplication(self)
@@ -3385,6 +3554,12 @@ class BuiltinRuntime:
             return self._topic_memory_processing_available
         return family == "memory"
 
+    async def _inactive_topic_refs(self, scope_id: str) -> frozenset[tuple[str, int]]:
+        """Return Topic Revisions that a lifecycle event withdrew."""
+
+        if self._source_lifecycle_store is None:
+            return frozenset()
+        return await self._source_lifecycle_store.inactive_topic_refs(scope_id)
     async def _count_pending(self, scope_id: str, binding: str) -> int:
         if self._source_count_probe is None:
             return 0
@@ -3703,6 +3878,12 @@ async def _cited_entry(
         raise MemoryEntryNotFoundError(citation.entry_id)
     return await service.validate_citation(citation)
 
+
+def _citation_in_manifest(memory: Memory, citation: MemoryCitation) -> bool:
+    return any(
+        item.entry_id == citation.entry_id and item.entry_version_id == citation.entry_version_id
+        for item in memory.content.manifest.entries
+    )
 
 def _entry_record(memory: Memory, entry: MemoryEntryVersion) -> MemoryEntryRecord:
     manifest_entry = next(
