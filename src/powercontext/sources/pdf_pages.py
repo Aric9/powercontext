@@ -62,14 +62,28 @@ _VARIANT_RULES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
     ("e", 0, ("d", "s")),
 )
 # Layout and filing boilerplate shared by nearly every page; useless for feedback.
-_BEST_RANK_WEIGHT = 0.42
-_AGREEMENT_WEIGHT = 1.03
-_VOTE_WEIGHT = 0.32
-_NUMERIC_DENSITY_WEIGHT = 1.68
-_DOLLAR_DENSITY_WEIGHT = 0.0
-_STATEMENT_WEIGHT = 0.12
-_OPENING_WEIGHT = 0.75
-_COVERAGE_WEIGHT = 0.84
+_DEFAULT_WEIGHTS = {
+    "best": 0.42,
+    "agreement": 1.03,
+    "votes": 0.32,
+    "numeric": 1.68,
+    "dollar": 0.0,
+    "statement": 0.12,
+    "opening": 0.75,
+    "coverage": 0.84,
+}
+# A document-scoped pool ranks pages of one report against each other, so the
+# witness and agreement signals carry more weight than in a single-document scope.
+_SCOPED_WEIGHTS = {
+    "best": 1.13,
+    "agreement": 1.95,
+    "votes": 0.871,
+    "numeric": 2.739,
+    "dollar": 0.461,
+    "statement": 0.179,
+    "opening": 0.674,
+    "coverage": 1.24,
+}
 
 # Boilerplate that FinanceBench-style prompts add around the actual question. It carries
 # no page-level evidence, and left in the query it would dilute term coverage.
@@ -379,10 +393,16 @@ async def search_pdf_pages(memory: object, question: str, limit: int = 10) -> tu
     sequence = _question_sequence(question)
     if not sequence:
         return ()
-    probes = await _probe_pages(memory, sequence, question)
+    # One cheap preview tells us whether this Memory holds several documents. When it
+    # does, probes are prefixed with the document identity the question names so a
+    # larger report cannot crowd out the pages of the report being asked about.
+    preview = await _search_hits(memory, question)
+    scope = _question_document(preview, question)
+    probes = await _probe_pages(memory, sequence, question, scope=scope)
     if not probes:
         return ()
-    return _rank_pages(probes, _probe_terms(tuple(dict.fromkeys(sequence))), question, limit)
+    weights = _DEFAULT_WEIGHTS if scope is None else _SCOPED_WEIGHTS
+    return _rank_pages(probes, _probe_terms(tuple(dict.fromkeys(sequence))), question, limit, weights)
 
 
 def _hit_key(hit: object) -> tuple[str, str, str, str]:
@@ -390,7 +410,36 @@ def _hit_key(hit: object) -> tuple[str, str, str, str]:
     return (reference.family, reference.artifact_id, hit.entry_id, hit.entry_version_id)
 
 
-async def _probe_pages(memory: object, sequence: tuple[str, ...], question: str) -> list[list[object]]:
+def _document_identity(hit: object) -> str:
+    """Return the document identity a projected page carries on its first line."""
+
+    raw = getattr(hit, "text", "")
+    if not isinstance(raw, str) or "\n" not in raw:
+        return ""
+    first_line = raw.split("\n", 1)[0].strip()
+    return first_line.split("_", 1)[0].strip().lower()
+
+
+def _question_document(preview: list[object], question: str) -> str | None:
+    """Pick the document identity the question names, if the Memory holds several."""
+
+    identities = {identity for hit in preview if (identity := _document_identity(hit))}
+    if len(identities) < 2:
+        return None
+    compact = "".join(question.lower().split())
+    matches = [identity for identity in identities if identity and identity in compact]
+    if not matches:
+        return None
+    return max(matches, key=len)
+
+
+async def _probe_pages(
+    memory: object,
+    sequence: tuple[str, ...],
+    question: str,
+    *,
+    scope: str | None = None,
+) -> list[list[object]]:
     """Probe the question through several independent lexical views.
 
     One long query is admitted only when a page covers a share of every term, which buries
@@ -413,19 +462,22 @@ async def _probe_pages(memory: object, sequence: tuple[str, ...], question: str)
         if not query or query in seen:
             continue
         seen.add(query)
-        hits = await _search_hits(memory, query)
+        effective = query if scope is None else f"{scope} {query}"
+        hits = await _search_hits(memory, effective)
+        if scope is not None:
+            hits = [hit for hit in hits if _document_identity(hit) == scope]
         if hits:
             probes.append(hits)
     return probes
 
 
-async def _search_hits(memory: object, query: str) -> list[object]:
+async def _search_hits(memory: object, query: str, limit: int = _CANDIDATE_LIMIT) -> list[object]:
     """Run one lexical probe, treating a rejected rewrite as an empty candidate list."""
 
     from powercontext.builtin.runtime import SearchMemoryRequest
 
     try:
-        page = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=_CANDIDATE_LIMIT))
+        page = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=limit))
     except Exception:  # a rejected probe must not lose the other candidates
         return []
     return list(page.hits)
@@ -436,6 +488,7 @@ def _rank_pages(
     terms: tuple[str, ...],
     question: str,
     limit: int,
+    weights: dict[str, float],
 ) -> tuple:
     """Rank whole pages by multi-probe agreement and page form.
 
@@ -476,14 +529,14 @@ def _rank_pages(
         token_set = set(tokens)
         opening = " ".join(hit_text.split()[:18])
         score = (
-            _BEST_RANK_WEIGHT * (1.0 / best[key])
-            + _AGREEMENT_WEIGHT * (value / strongest)
-            + _VOTE_WEIGHT * min(votes[key] / 12.0, 1.0)
-            + _NUMERIC_DENSITY_WEIGHT * (digits / total)
-            + _DOLLAR_DENSITY_WEIGHT * min(hit_text.count("$") / 10.0, 1.0)
-            + _STATEMENT_WEIGHT * (1.0 if "consolidated statement" in hit_text else 0.0)
-            + _OPENING_WEIGHT * (sum(1 for term in term_set if term in opening) / max(len(term_set), 1))
-            + _COVERAGE_WEIGHT * (len(term_set & token_set) / max(len(term_set), 1))
+            weights["best"] * (1.0 / best[key])
+            + weights["agreement"] * (value / strongest)
+            + weights["votes"] * min(votes[key] / 12.0, 1.0)
+            + weights["numeric"] * (digits / total)
+            + weights["dollar"] * min(hit_text.count("$") / 10.0, 1.0)
+            + weights["statement"] * (1.0 if "consolidated statement" in hit_text else 0.0)
+            + weights["opening"] * (sum(1 for term in term_set if term in opening) / max(len(term_set), 1))
+            + weights["coverage"] * (len(term_set & token_set) / max(len(term_set), 1))
         )
         scored.append((score, key))
     scored.sort(reverse=True)
