@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 import re
 import unicodedata
 from itertools import pairwise
@@ -61,28 +62,64 @@ _VARIANT_RULES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
     ("ly", 2, ("",)),
     ("e", 0, ("d", "s")),
 )
+# Filing vocabulary that answers a question without reusing its wording: a question about
+# "legal battles" is answered by a "Legal Proceedings" note, and "customers" by a
+# customers/clients section. Each entry adds at most two extra probes.
+_CONCEPT_TERMS: dict[str, tuple[str, ...]] = {
+    "legal": ("litigation", "proceedings"),
+    "litigation": ("legal", "proceedings"),
+    "lawsuit": ("litigation", "proceedings"),
+    "lawsuits": ("litigation", "proceedings"),
+    "battles": ("litigation", "proceedings"),
+    "claims": ("litigation",),
+    "customers": ("clients", "customer"),
+    "customer": ("clients", "customers"),
+    "clients": ("customers",),
+    "employees": ("workforce", "personnel"),
+    "workforce": ("employees",),
+    "debt": ("borrowings", "indebtedness"),
+    "borrowings": ("debt",),
+    "revenue": ("revenues", "sales"),
+    "revenues": ("revenue", "sales"),
+    "sales": ("revenue", "revenues"),
+    "income": ("earnings", "profit"),
+    "profit": ("income", "earnings"),
+    "capex": ("capital expenditures",),
+    "capital": ("capital expenditures",),
+    "suppliers": ("supplier", "vendors"),
+    "competition": ("competitors", "competitive"),
+    "pension": ("retirement", "benefit plans"),
+    "goodwill": ("impairment",),
+    "leases": ("lease",),
+    "tax": ("income taxes",),
+}
+_MAX_CONCEPT_TERMS = 3
 # Layout and filing boilerplate shared by nearly every page; useless for feedback.
 _DEFAULT_WEIGHTS = {
-    "best": 0.42,
-    "agreement": 1.03,
-    "votes": 0.32,
-    "numeric": 1.68,
-    "dollar": 0.0,
-    "statement": 0.12,
-    "opening": 0.75,
-    "coverage": 0.84,
+    "best": 0.433,
+    "agreement": 2.211,
+    "votes": 1.202,
+    "numeric": 2.786,
+    "dollar": 0.348,
+    "statement": 0.457,
+    "opening": 1.044,
+    "coverage": 0.191,
+    "concept_occurrences": 1.532,
+    "concept_distinct": 0.624,
 }
 # A document-scoped pool ranks pages of one report against each other, so the
 # witness and agreement signals carry more weight than in a single-document scope.
 _SCOPED_WEIGHTS = {
-    "best": 1.13,
-    "agreement": 1.95,
-    "votes": 0.871,
-    "numeric": 2.739,
-    "dollar": 0.461,
-    "statement": 0.179,
-    "opening": 0.674,
-    "coverage": 1.24,
+    "best": 1.745,
+    "agreement": 2.666,
+    "votes": 0.829,
+    "numeric": 2.643,
+    "dollar": 1.029,
+    "statement": 0.126,
+    "opening": 0.642,
+    "coverage": 2.848,
+    "concept_occurrences": 1.454,
+    "concept_distinct": 2.509,
 }
 
 # Boilerplate that FinanceBench-style prompts add around the actual question. It carries
@@ -454,6 +491,15 @@ async def _probe_pages(
     queries.extend(_adjacent_phrases(sequence))
     for term in terms[:_MAX_VARIANT_TERMS]:
         queries.extend(_variant_terms(term))
+    expanded = 0
+    for term in terms:
+        related = _CONCEPT_TERMS.get(term)
+        if not related:
+            continue
+        queries.extend(related)
+        expanded += 1
+        if expanded >= _MAX_CONCEPT_TERMS:
+            break
     queries.append(question)
 
     probes: list[list[object]] = []
@@ -516,6 +562,7 @@ def _rank_pages(
 
     strongest = max(harmonic.values()) or 1.0
     term_set = frozenset(terms)
+    concept_terms = _concept_terms(terms)
     scored: list[tuple[float, tuple[str, str, str, str]]] = []
     for key, value in harmonic.items():
         # The projection prefixes the document identity; page features are measured on
@@ -528,6 +575,8 @@ def _rank_pages(
         digits = sum(1 for token in tokens if token.isdigit())
         token_set = set(tokens)
         opening = " ".join(hit_text.split()[:18])
+        concept_occurrences = sum(hit_text.count(term) for term in concept_terms)
+        concept_distinct = sum(1 for term in concept_terms if term in hit_text)
         score = (
             weights["best"] * (1.0 / best[key])
             + weights["agreement"] * (value / strongest)
@@ -537,6 +586,9 @@ def _rank_pages(
             + weights["statement"] * (1.0 if "consolidated statement" in hit_text else 0.0)
             + weights["opening"] * (sum(1 for term in term_set if term in opening) / max(len(term_set), 1))
             + weights["coverage"] * (len(term_set & token_set) / max(len(term_set), 1))
+            + weights["concept_occurrences"] * (math.log1p(concept_occurrences) / 4.0)
+            + weights["concept_distinct"]
+            * (concept_distinct / max(len(concept_terms), 1))
         )
         scored.append((score, key))
     scored.sort(reverse=True)
@@ -627,6 +679,23 @@ def _adjacent_phrases(sequence: tuple[str, ...], /) -> tuple[str, ...]:
             phrases.append(phrase)
     return tuple(phrases[:_MAX_PHRASE_TERMS])
 
+
+def _concept_terms(terms: tuple[str, ...]) -> tuple[str, ...]:
+    """Related filing terms already probed for this question."""
+
+    concepts: list[str] = []
+    expanded = 0
+    for term in terms:
+        related = _CONCEPT_TERMS.get(term)
+        if not related:
+            continue
+        for item in related:
+            if item not in concepts:
+                concepts.append(item)
+        expanded += 1
+        if expanded >= _MAX_CONCEPT_TERMS:
+            break
+    return tuple(concepts)
 
 def _probe_terms(terms: tuple[str, ...]) -> tuple[str, ...]:
     """Order probe terms so distinctive content words are probed before boilerplate."""
