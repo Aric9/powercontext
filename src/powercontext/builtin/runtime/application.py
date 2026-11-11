@@ -344,6 +344,10 @@ _CONTEXT_TOPIC_EMBEDDING_TIMEOUT_SECONDS = 0.25
 _MEMORY_CAPTURE_STAGE = "memory.capture"
 
 # Which persistent Source cursor bounds each family's count window.
+# The processor retry delay (seconds) and the number of automatic re-attempts one
+# failed count launch may schedule while the Runtime stays open.
+_COUNT_TRIGGER_RETRY_SECONDS = 30.0
+_COUNT_TRIGGER_RETRY_ATTEMPTS = 3
 _SOURCE_COUNT_BINDINGS = {
     "memory": SOURCE_WINDOW_TRIGGER_NAME,
     "topic-memory": TOPIC_MEMORY_SOURCE_WINDOW_BINDING,
@@ -873,7 +877,9 @@ class RemoteIngestionApplication:
 
     async def submit(self, request: SubmitSourceObservation, /) -> SourceReceipt:
         async with self._runtime._scope_operation(request.scope_id):
-            return await self._require_service().submit_source_observation(request)
+            receipt = await self._require_service().submit_source_observation(request)
+        self._runtime.note_source_captured(request.scope_id)
+        return receipt
 
     async def commit(self, request: CommitConnectorCheckpoint, /) -> ConnectorCheckpointState:
         async with self._runtime._scope_operation(request.binding.scope_id):
@@ -3185,6 +3191,7 @@ class BuiltinRuntime:
         source_count_thresholds: Mapping[str, int] | None = None,
         source_lifecycle_store: SourceLifecycleStore | None = None,
         source_count_probe: Callable[[str, str], Awaitable[int]] | None = None,
+        source_position_probe: Callable[[str, str], Awaitable[int]] | None = None,
         count_trigger_families: tuple[str, ...] | None = None,
         context_assembly_max_entries: int = 8,
         recall_sufficiency_policy: RecallSufficiencyPolicy | None = None,
@@ -3247,10 +3254,12 @@ class BuiltinRuntime:
         self._source_count_thresholds = dict(source_count_thresholds or {})
         self._source_lifecycle_store = source_lifecycle_store
         self._source_count_probe = source_count_probe
+        self._source_position_probe = source_position_probe
         self._count_trigger_families = count_trigger_families
         self._count_trigger_tasks: set[asyncio.Task[Any]] = set()
         self._count_trigger_locks: dict[str, asyncio.Lock] = {}
-        self._topic_count_last_pending: dict[str, int] = {}
+        self._topic_count_high: dict[str, int] = {}
+        self._count_trigger_retries: dict[str, int] = {}
         self._review_service = review_service
         self.profiles = profiles
         self.subject_sources = subject_sources
@@ -3568,6 +3577,29 @@ class BuiltinRuntime:
                     exc_info=error,
                     extra={"event": "sources.count_threshold.failure", "family": family},
                 )
+                self._schedule_count_retry(scope_id)
+
+    def _schedule_count_retry(self, scope_id: str) -> None:
+        """Retry a failed launch once the processor retry delay has elapsed."""
+
+        attempts = self._count_trigger_retries.get(scope_id, 0)
+        if attempts >= _COUNT_TRIGGER_RETRY_ATTEMPTS:
+            return
+        self._count_trigger_retries[scope_id] = attempts + 1
+        if self._closing or self._closed:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def retry() -> None:
+            await asyncio.sleep(_COUNT_TRIGGER_RETRY_SECONDS)
+            await self._run_count_trigger(scope_id)
+
+        task = loop.create_task(retry())
+        self._count_trigger_tasks.add(task)
+        task.add_done_callback(self._count_trigger_tasks.discard)
 
     def _count_family_enabled(self, family: str) -> bool:
         if self._count_trigger_families is not None and family not in self._count_trigger_families:
@@ -3587,6 +3619,11 @@ class BuiltinRuntime:
             return 0
         return await self._source_count_probe(scope_id, binding)
 
+    async def _source_position(self, scope_id: str, binding: str) -> int:
+        if self._source_position_probe is None:
+            return 0
+        return await self._source_position_probe(scope_id, binding)
+
     async def _drain_count_threshold(self, scope_id: str, family: str, threshold: int) -> None:
         """Launch original processing while the pending count still meets the threshold."""
 
@@ -3594,9 +3631,12 @@ class BuiltinRuntime:
         pending = await self._count_pending(scope_id, binding)
         if family == "topic-memory":
             # One accepted wave keeps its own windowing; never re-apply the threshold to it.
-            if pending < threshold or pending == self._topic_count_last_pending.get(scope_id):
+            # The mark is the journal high watermark, so a later crossing that happens to
+            # leave the same number of pending identities still requests a new wave.
+            high_watermark = await self._source_position(scope_id, binding)
+            if pending < threshold or high_watermark <= self._topic_count_high.get(scope_id, -1):
                 return
-            self._topic_count_last_pending[scope_id] = pending
+            self._topic_count_high[scope_id] = high_watermark
             await self.topic_memory.for_scope(scope_id).flush()
             return
         while pending >= threshold:
