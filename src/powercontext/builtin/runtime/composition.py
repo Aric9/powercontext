@@ -377,6 +377,13 @@ async def _pending_source_count(contexts: RelationalContexts, scope_id: str, bin
     return max(0, int(high_watermark) - (0 if cursor is None else cursor.cursor.sequence))
 
 
+async def _source_position(contexts: RelationalContexts, scope_id: str, binding_name: str) -> int:
+    """Return the journal high watermark the count trigger last observed."""
+
+    async with contexts.database.transaction() as connection:
+        return int(await contexts.repositories.sources.journal_position(connection, scope_id))
+
+
 @asynccontextmanager
 async def open_builtin_runtime(
     config: BuiltinConfig,
@@ -625,6 +632,9 @@ async def open_builtin_runtime(
                 source_lifecycle_store=SourceLifecycleStore(contexts.database),
                 source_count_probe=(
                     None if not source_count_thresholds else partial(_pending_source_count, contexts)
+                ),
+                source_position_probe=(
+                    None if not source_count_thresholds else partial(_source_position, contexts)
                 ),
                 count_trigger_families=config.runtime.artifact_processing_families,
                 context_assembly_max_entries=config.runtime.context_assembly_max_entries,
