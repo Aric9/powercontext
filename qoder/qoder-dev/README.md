@@ -22,7 +22,7 @@
 | 墙钟耗时 | 1 542 827 ms（约 25.7 分钟） |
 | Credits | 20.8586 |
 | 结束状态 | `success`，`is_error=false` |
-| 产出 | 41 个文件、2 841 行（`git show --stat 102af19`） |
+| 产出 | 41 个文件、2 841 行（`qoder/readdesk`、`tests/`、`scripts/`） |
 | 自测 | pytest 42 passed；`scripts/verify.py` 9/9 PASS |
 
 Qoder 在同一个会话内自行完成了“阅读规格 → 确认 seekdb API → 写代码 → 跑测试 → 修复”的闭环，
@@ -37,7 +37,7 @@ Qoder 在同一个会话内自行完成了“阅读规格 → 确认 seekdb API 
 
 1. `run1.jsonl` 每条消息都带 `session_id`、模型、工具调用参数与结果，最后一条 `result` 记录 credits、回合数与耗时。
 2. `TRANSCRIPT.md` 是原始流的可读版本，按顺序列出 Qoder 的说明、执行的命令与写入的文件。
-3. git 提交 `102af19`（`feat: ReadDesk v1 implemented by Qoder (run1)`）的 `--stat` 与 `run1.jsonl` 中的 Write/Edit 路径一一对应。
+3. 提交中的 `qoder/readdesk`、`tests/`、`scripts/` 文件列表与 `run1.jsonl` 中的 Write/Edit 路径一一对应。
 4. `pytest.run1.log`、`verify.run1.log` 是评委可复跑的独立验证输出，不是 Qoder 自述。
 
 ## 4. 复现方式
