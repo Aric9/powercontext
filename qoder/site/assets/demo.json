@@ -1,0 +1,243 @@
+{
+  "generated_at": "2026-11-12T11:25:45.478543+00:00",
+  "queries": [
+    {
+      "q": "混合检索 RRF",
+      "results": [
+        {
+          "title": "混合检索在科研笔记库中的效果：BM25 与向量的 RRF 融合",
+          "section": "结论",
+          "citation": "01-hybrid-retrieval.md#L32-L34",
+          "score": 0.0692,
+          "snippet": "结论 混合检索应作为科研笔记库的默认检索方式；若只能保留一路，优先保留向量检索，但会损失编号类查询的召回。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "混合检索在科研笔记库中的效果：BM25 与向量的 RRF 融合",
+          "section": "摘要",
+          "citation": "01-hybrid-retrieval.md#L12-L15",
+          "score": 0.0679,
+          "snippet": "摘要 科研笔记同时包含术语、编号、公式名与自然语言描述。单一向量检索对专有名词不敏感，单一路词检索又无法处理同义表达。 本报告在 6 篇笔记、312 个段落上比较 BM25、向量检索与两者融合的效果，发现 RRF 融合在 nDCG@10 上比最佳单路提升 12.4%。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "混合检索在科研笔记库中的效果：BM25 与向量的 RRF 融合",
+          "section": "实验",
+          "citation": "01-hybrid-retrieval.md#L27-L30",
+          "score": 0.0667,
+          "snippet": "…在人工标注的 40 条查询上，BM25 的 nDCG@10 为 0.612，向量检索为 0.648，RRF 融合为 0.728。 融合相对最佳单路提升 12.4%。对于包含条款编号的查询，融合的 Recall@5 从 0.71 提升到 0.89。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "混合检索在科研笔记库中的效果：BM25 与向量的 RRF 融合",
+          "section": "RRF 融合",
+          "citation": "01-hybrid-retrieval.md#L22-L25",
+          "score": 0.0605,
+          "snippet": "RRF 融合 RRF 不依赖两路分数的量纲，适合 BM25 与余弦相似度这种不可直接比较的分数。第 i 个候选的融合分数为 `sum(1 / (k + rank_i))`。实验表明 k 在 40–80 之间变化时，nDCG 波动小于 0.8 个百分点。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "混合检索在科研笔记库中的效果：BM25 与向量的 RRF 融合",
+          "section": "方法",
+          "citation": "01-hybrid-retrieval.md#L17-L20",
+          "score": 0.0494,
+          "snippet": "…回前 30 个候选，再用 Reciprocal Rank Fusion 合并。 RRF 的平滑常数取 k=60，两路权重相等；对标题命中额外加 0.02，对章节标题命中加 0.01。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        }
+      ]
+    },
+    {
+      "q": "分块 重叠 比例",
+      "results": [
+        {
+          "title": "面向长文档的分块策略：章节切分、窗口大小与重叠比例",
+          "section": "窗口与重叠",
+          "citation": "02-chunking-strategies.md#L20-L23",
+          "score": 0.0625,
+          "snippet": "窗口与重叠 固定窗口实验显示，512 token、15% 重叠是质量与存储成本的折中点。重叠低于 8% 时会切断跨段论证， 高于 25% 时重复块会挤占 top-k。小于 200 字符的块噪声明显，建议与相邻块合并。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "面向长文档的分块策略：章节切分、窗口大小与重叠比例",
+          "section": "建议",
+          "citation": "02-chunking-strategies.md#L25-L27",
+          "score": 0.0525,
+          "snippet": "建议 优先按标题切分，章节过长再按段落切；块大小控制在 600–900 字符，重叠不超过 120 字符，并为每块保留起止行号。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "面向长文档的分块策略：章节切分、窗口大小与重叠比例",
+          "section": "研究问题",
+          "citation": "02-chunking-strategies.md#L11-L13",
+          "score": 0.0523,
+          "snippet": "研究问题 检索质量的上限往往由分块决定。块太大时一个块混入多个主题，块太小时缺少上下文。本文比较章节切分与固定窗口切分。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "面向长文档的分块策略：章节切分、窗口大小与重叠比例",
+          "section": "章节切分",
+          "citation": "02-chunking-strategies.md#L15-L18",
+          "score": 0.0356,
+          "snippet": "章节切分 按 Markdown 标题切分保留了作者的组织结构。我们在 120 篇论文笔记上比较，章节切分比 512 token 固定窗口的 Recall@10 高 8.7 个百分点；当章节超过 1200 字符时再按段落二次切分，效果最好。",
+          "matched_by": [
+            "dense"
+          ]
+        },
+        {
+          "title": "引用落地：让生成的每句话都能回溯到原文行号",
+          "section": "行号引用",
+          "citation": "04-citation-grounding.md#L15-L18",
+          "score": 0.0318,
+          "snippet": "…制携带 `文件#起行-止行`，生成时只允许引用这些区间。内部评测中，无依据断言的比例从 23% 降到 14.5%， 相对下降 37%。引用粒度以段落级最佳：句子级过碎，文档级过粗。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        }
+      ]
+    },
+    {
+      "q": "行号引用 幻觉",
+      "results": [
+        {
+          "title": "引用落地：让生成的每句话都能回溯到原文行号",
+          "section": "行号引用",
+          "citation": "04-citation-grounding.md#L15-L18",
+          "score": 0.0787,
+          "snippet": "行号引用 我们在检索结果中强制携带 `文件#起行-止行`，生成时只允许引用这些区间。内部评测中，无依据断言的比例从 23% 降到 14.5%， 相对下降 37%。引用粒度以段落级最佳：句子级过碎，文档级过粗。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "引用落地：让生成的每句话都能回溯到原文行号",
+          "section": "实践建议",
+          "citation": "04-citation-grounding.md#L24-L28",
+          "score": 0.0679,
+          "snippet": "实践建议 1. 入库时就保留行号，而不是生成时再猜； 2. 输出中同时给文档标题与行号，便于人工回查； 3. 对没有检索证据的断言明确标注“无引用”，不要伪造出处。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "研究生文献工作流访谈：找引用到底花多少时间",
+          "section": "时间分布",
+          "citation": "06-research-workflow.md#L15-L18",
+          "score": 0.0517,
+          "snippet": "时间分布 受访者每周平均花 6.5 小时用于“找回某句话的出处”和“整理引用格式”，其中 41% 的时间耗在跨文件夹搜索。 写作阶段最痛苦的是“记得读过但找不到”。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "引用落地：让生成的每句话都能回溯到原文行号",
+          "section": "证据简报",
+          "citation": "04-citation-grounding.md#L20-L22",
+          "score": 0.0515,
+          "snippet": "证据简报 把同一主题的证据按文档分组，先列原文再写要点，可以显著降低“引用与结论不匹配”。编辑复核时间平均缩短 28%。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "研究生文献工作流访谈：找引用到底花多少时间",
+          "section": "设计启示",
+          "citation": "06-research-workflow.md#L25-L29",
+          "score": 0.0501,
+          "snippet": "设计启示 1. 检索结果必须带可复制的引用，而不是只给文档链接； 2. 导入要足够轻，最好一条命令处理一个文件夹； 3. 本地存储是获得信任的前提，尤其是未发表材料。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        }
+      ]
+    },
+    {
+      "q": "本地 延迟 隐私",
+      "results": [
+        {
+          "title": "本地优先的科研 RAG：隐私、延迟与可维护性",
+          "section": "延迟与资源",
+          "citation": "05-local-first-rag.md#L15-L18",
+          "score": 0.0782,
+          "snippet": "延迟与资源 在 10 万块、2.1 GB 的本地库上，嵌入式 seekdb 的混合检索 P95 延迟为 120 毫秒，冷启动约 1.8 秒。 哈希向量编码单块约 3 毫秒，导入 1 万块约 40 秒。内存占用稳定在 600 MB 以内。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "本地优先的科研 RAG：隐私、延迟与可维护性",
+          "section": "隐私",
+          "citation": "05-local-first-rag.md#L20-L23",
+          "score": 0.0606,
+          "snippet": "隐私 数据目录权限设为仅当前用户可读；不发送任何网络请求；导出简报时只包含用户主动选择的片段。 审计日志只记录查询耗时与命中数量，不记录查询原文。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "本地优先的科研 RAG：隐私、延迟与可维护性",
+          "section": "动机",
+          "citation": "05-local-first-rag.md#L11-L13",
+          "score": 0.0513,
+          "snippet": "动机 未发表论文、基金申请书与实验记录不适合上传到第三方服务。本地优先意味着索引、检索与简报生成都在本机完成。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "中文科研文本的轻量 embedding 评测：哈希基线是否够用",
+          "section": "结论",
+          "citation": "03-embedding-eval.md#L25-L28",
+          "score": 0.0484,
+          "snippet": "结论 对于本地优先、注重可复现与低延迟的场景，哈希 embedding 可以作为默认基线；若追求语义泛化，可替换为神经模型， 但需要重新建索引并接受更高的资源占用。",
+          "matched_by": [
+            "dense",
+            "fts"
+          ]
+        },
+        {
+          "title": "本地优先的科研 RAG：隐私、延迟与可维护性",
+          "section": "可维护性",
+          "citation": "05-local-first-rag.md#L25-L28",
+          "score": 0.0325,
+          "snippet": "可维护性 索引与元数据放在同一数据目录，升级时可用 `readdesk import` 重建；embedding 版本写入集合元数据， 版本不匹配时提示重建而不是静默混用。",
+          "matched_by": [
+            "dense"
+          ]
+        }
+      ]
+    }
+  ]
+}

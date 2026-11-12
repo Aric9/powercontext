@@ -1,0 +1,10 @@
+# ReadDesk v1 依赖（与仓库 .venv 一致的固定版本；Python 3.12）
+pyseekdb==1.4.0.post1
+seekdb==1.4.0.dev2
+fastapi==0.162.5
+uvicorn==0.54.0
+jinja2==3.1.6
+python-multipart==0.0.33
+pytest==9.2.0
+jieba==0.42.1
+httpx==0.28.1

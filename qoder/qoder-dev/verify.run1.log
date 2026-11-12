@@ -1,0 +1,11 @@
+[PASS] 1. init 成功，集合为空
+[PASS] 2. 导入 6 篇文档且 ≥24 块
+[PASS] 3. 「混合检索…」Top1=01 且 snippet 含 RRF
+[PASS] 4. 「分块 重叠 比例」Top3 含 02-chunking-strategies.md
+[PASS] 5. --tag evaluation 过滤全部命中 evaluation
+[PASS] 6. brief 含 ≥3 个不同 #L 引用与覆盖统计
+[PASS] 7. 重复导入文档数与块数不变
+[PASS] 8. Web GET /healthz 200 且 docs=6
+[PASS] 9. pytest -q 全量通过
+
+合计：9/9 项通过

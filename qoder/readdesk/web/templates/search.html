@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}检索：{{ q }} — ReadDesk{% endblock %}
+{% block content %}
+  <section class="panel">
+    <form action="/search" method="get" class="filter-form">
+      <input type="text" name="q" value="{{ q }}" required>
+      <select name="tag" aria-label="标签过滤">
+        <option value="">全部标签</option>
+        {% for t in tags %}<option value="{{ t }}" {% if t == tag %}selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select>
+      <input type="text" name="year" value="{{ year }}" placeholder="年份" pattern="\d{4}" size="6" aria-label="年份过滤">
+      <button type="submit">检索</button>
+    </form>
+    <p class="muted">
+      查询：<strong>{{ q }}</strong>
+      {% if tag %} · 标签过滤：{{ tag }}{% endif %}{% if year %} · 年份过滤：{{ year }}{% endif %}
+      {% if terms %} · 检索词：{% for t in terms %}<code>{{ t }}</code> {% endfor %}{% endif %}
+    </p>
+  </section>
+
+  {% if not has_results %}
+  <section class="panel empty-state">
+    <h2>没有找到匹配的证据</h2>
+    <p>库中共有 {{ docs }} 篇文档、{{ chunks }} 个证据块。建议：换用更短的关键词、去掉标签/年份过滤，或先导入更多笔记。</p>
+  </section>
+  {% endif %}
+
+  {% for r in results %}
+  <article class="card">
+    <header>
+      <h2><a href="{{ r.url }}">{{ r.title }}</a></h2>
+      <span class="score">score {{ "%.4f" | format(r.score) }}</span>
+    </header>
+    <p class="meta">
+      章节：{{ r.section }} · 命中：{{ r.matched_by }}
+      {% if r.year %} · {{ r.year }}{% endif %}
+      {% for t in r.tags %}<a class="tag" href="/search?q={{ q | urlencode }}&tag={{ t | urlencode }}">{{ t }}</a>{% endfor %}
+    </p>
+    <p class="citation">
+      <code>{{ r.citation }}</code>
+      <button type="button" class="copy-btn" data-copy="{{ r.citation }}">复制引用</button>
+    </p>
+    <blockquote class="snippet">{{ r.snippet_html | safe }}</blockquote>
+  </article>
+  {% endfor %}
+
+  {% if has_results %}
+  <section class="panel">
+    <form action="/brief" method="post" class="filter-form">
+      <input type="hidden" name="topic" value="{{ q }}">
+      <button type="submit">用当前查询生成证据简报</button>
+    </form>
+  </section>
+  {% endif %}
+{% endblock %}

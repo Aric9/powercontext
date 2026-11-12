@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ReadDesk 研读台{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">📚 ReadDesk 研读台</a>
+    <nav>
+      <a href="/">首页</a>
+      <a href="/search?q={{ '混合检索' | urlencode }}">检索</a>
+    </nav>
+    <form class="topsearch" action="/search" method="get" role="search">
+      <input type="search" name="q" placeholder="检索证据段落…" value="{{ q }}" aria-label="检索">
+      <button type="submit">检索</button>
+    </form>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    ReadDesk v{{ version }} · 数据仅存本机 · 文档 {{ docs | default(0) }} 篇 / 证据块 {{ chunks | default(0) }} 个
+  </footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

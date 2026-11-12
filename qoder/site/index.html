@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>研读台 ReadDesk — 把读过的文献，变成可引用的证据</title>
+  <meta name="description" content="ReadDesk 是一个本地优先的科研阅读与证据检索工作台：导入 Markdown 笔记，用 seekdb 混合检索定位原句，一键生成带行号引用的证据简报。" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top">
+      <span class="brand-mark">读</span>
+      <span class="brand-name">研读台 <em>ReadDesk</em></span>
+    </a>
+    <nav class="nav">
+      <a href="#problem">问题</a>
+      <a href="#features">功能</a>
+      <a href="#demo">演示</a>
+      <a href="#tech">技术</a>
+      <a href="#qoder">Qoder</a>
+      <a href="#verify">验收</a>
+    </nav>
+    <a class="ghost-button" href="https://github.com/Aric9/powercontext/tree/qoder/readdesk/qoder" target="_blank" rel="noreferrer">代码仓库 ↗</a>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">本地优先 · 科研阅读 · 证据检索</p>
+        <h1>把读过的文献，<br />变成可引用的证据。</h1>
+        <p class="lede">
+          ReadDesk 把散落在文件夹里的论文笔记导入本地 seekdb 库，用向量 + 全文混合检索找回原句，
+          每一条结果都带 <code>文件#行号</code>，一键生成可直接贴进综述的证据简报。
+        </p>
+        <div class="hero-actions">
+          <a class="primary-button" href="#demo">看看检索效果</a>
+          <a class="secondary-button" href="#start">5 分钟本地运行</a>
+        </div>
+        <ul class="chips" aria-label="技术栈">
+          <li>Python 3.12</li>
+          <li>seekdb 嵌入式</li>
+          <li>FastAPI</li>
+          <li>Qoder CLI</li>
+          <li>零联网</li>
+        </ul>
+      </div>
+      <figure class="hero-shot">
+        <div class="browser-bar"><span></span><span></span><span></span><em>readdesk · 本地</em></div>
+        <img src="assets/home.png" alt="ReadDesk 首页：库统计与搜索框" loading="eager" />
+        <figcaption>本地 Web UI：库统计、搜索与过滤，数据不出机器。</figcaption>
+      </figure>
+    </section>
+
+    <section class="stats" aria-label="项目数据">
+      <div><strong>6</strong><span>篇样例笔记</span></div>
+      <div><strong id="stat-chunks">25</strong><span>个可引用证据块</span></div>
+      <div><strong>9/9</strong><span>验收项通过</span></div>
+      <div><strong>0</strong><span>次运行时联网</span></div>
+    </section>
+
+    <section id="problem" class="section">
+      <p class="section-kicker">为什么需要它</p>
+      <h2>读过的内容，找不到出处</h2>
+      <div class="grid three">
+        <article class="card">
+          <span class="card-no">01</span>
+          <h3>引用不可回溯</h3>
+          <p>通用搜索只给文档链接，不告诉你原句在哪一节、哪一行，写综述时仍要重新翻 PDF。</p>
+        </article>
+        <article class="card">
+          <span class="card-no">02</span>
+          <h3>笔记与原文脱节</h3>
+          <p>摘录、批注、灵感散落在多个工具，下次写作时无法按主题重新召回。</p>
+        </article>
+        <article class="card">
+          <span class="card-no">03</span>
+          <h3>未发表材料不敢上云</h3>
+          <p>论文草稿、实验记录与基金申请不适合上传第三方服务，云端 RAG 有合规顾虑。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <p class="section-kicker">核心功能</p>
+      <h2>导入、检索、成稿，三步完成</h2>
+      <div class="flow">
+        <article>
+          <span class="flow-num">1</span>
+          <h3>一条命令导入</h3>
+          <p>读取 Markdown/文本的 front matter 与标题结构，按章节切块，保留起止行号，写入本地 seekdb。</p>
+          <code>readdesk import ~/papers</code>
+        </article>
+        <article>
+          <span class="flow-num">2</span>
+          <h3>混合检索找证据</h3>
+          <p>512 维本地哈希向量 + seekdb 全文过滤 + tag/year 下推，RRF 融合后返回可复制的证据段落。</p>
+          <code>readdesk search "混合检索 RRF"</code>
+        </article>
+        <article>
+          <span class="flow-num">3</span>
+          <h3>生成证据简报</h3>
+          <p>按文档分组，先列原文再写要点，附覆盖统计与引用清单，直接进入写作流程。</p>
+          <code>readdesk brief "检索融合" --out brief.md</code>
+        </article>
+      </div>
+      <div class="shots">
+        <figure class="shot">
+          <div class="browser-bar"><span></span><span></span><span></span><em>搜索结果</em></div>
+          <img src="assets/search.png" alt="ReadDesk 搜索结果页：证据段落、引用与分数" loading="lazy" />
+          <figcaption>每条结果都带 <code>文件#起行-止行</code> 与命中来源。</figcaption>
+        </figure>
+        <figure class="shot">
+          <div class="browser-bar"><span></span><span></span><span></span><em>文档详情</em></div>
+          <img src="assets/doc.png" alt="ReadDesk 文档详情页：元数据与分块行号" loading="lazy" />
+          <figcaption>文档元数据与块级行号，方便回查原文。</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="demo" class="section demo-section">
+      <p class="section-kicker">交互式演示</p>
+      <h2>试一个真实查询</h2>
+      <p class="demo-note">下面的结果由 ReadDesk 在本地对 6 篇样例笔记实际检索后导出，页面只做静态展示，不发起网络请求。</p>
+      <div class="demo-box">
+        <div class="demo-controls">
+          <input id="demo-input" type="search" placeholder="输入关键词，例如：RRF、分块、行号引用" aria-label="演示搜索" />
+          <div class="demo-chips" id="demo-chips"></div>
+        </div>
+        <ol class="demo-results" id="demo-results"></ol>
+      </div>
+    </section>
+
+    <section id="tech" class="section">
+      <p class="section-kicker">技术实现</p>
+      <h2>seekdb 承担检索，Qoder 承担开发</h2>
+      <div class="grid two">
+        <div class="panel">
+          <h3>运行时</h3>
+          <table class="tech-table">
+            <tr><th>seekdb</th><td>嵌入式集合 <code>readdesk_chunks</code>，HNSW cosine 512 维；全文 <code>$contains</code> 与 tag/year 标量过滤都在库内完成。</td></tr>
+            <tr><th>混合检索</th><td>dense + 全文双路召回，RRF（k=60）融合，并为标题/章节命中加权。</td></tr>
+            <tr><th>本地 embedding</th><td>分词 + 字符 n-gram + 带符号特征哈希，512 维、L2 归一化，同文本同向量，不调用模型。</td></tr>
+            <tr><th>Web</th><td>FastAPI + Jinja2，中文界面，静态资源本地化，离线可用。</td></tr>
+            <tr><th>引用</th><td>入库即记录 <code>path#start-end</code>，检索/简报只引用真实行号。</td></tr>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>数据流</h3>
+          <ol class="pipeline">
+            <li><span>Markdown / TXT</span> front matter + 标题解析</li>
+            <li><span>分块</span> 章节优先，600–900 字符，保留行号</li>
+            <li><span>seekdb</span> 向量 + 全文 + 元数据索引</li>
+            <li><span>混合检索</span> RRF 融合，返回证据段落</li>
+            <li><span>证据简报</span> 分组、引用、覆盖统计</li>
+          </ol>
+          <p class="muted">数据目录：<code>./.readdesk</code>，可用 <code>--data-dir</code> 覆盖；不发送任何网络请求。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="qoder" class="section">
+      <p class="section-kicker">Qoder 开发记录</p>
+      <h2>从规格到验收，由 Qoder 完成主体开发</h2>
+      <div class="qoder-grid">
+        <div class="panel">
+          <h3>开发方式</h3>
+          <p>使用 Qoder CLI CN（<code>qoderclicn</code>）的 headless 模式，以 <code>SPEC.md</code> 为唯一需求源，
+          在一个 71 回合的无头会话里完成“实现 → 自测 → 修复”，耗时 25.7 分钟、消耗 20.86 credits。
+          提示词、工具调用、修改文件、测试输出与用量都保存在 <code>qoder-dev/</code>。</p>
+          <ul class="record-list" id="qoder-record">
+            <li><strong>run 1</strong><span>后端、CLI、混合检索、Web UI、42 项测试与 9 项验收</span></li>
+            <li><strong>产物</strong><span>41 个文件、2 841 行代码，全部由 Qoder 写入</span></li>
+            <li><strong>核对</strong><span>原始 jsonl、提示词、可读转录、git diff 与测试日志</span></li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>可核对项</h3>
+          <ul class="check-list">
+            <li>Qoder 会话原始日志 <code>qoder-dev/run*.jsonl</code></li>
+            <li>每轮提示词 <code>qoder-dev/run*.prompt.md</code></li>
+            <li>可读转录 <code>qoder-dev/TRANSCRIPT.md</code></li>
+            <li>逐轮 git 提交与 diff</li>
+            <li>测试与验收原始输出</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="verify" class="section">
+      <p class="section-kicker">验收</p>
+      <h2>9 项验收，脚本可复跑</h2>
+      <div class="verify-wrap">
+        <ol class="verify-list" id="verify-list">
+          <li><span>初始化与空库</span><b>PASS</b></li>
+          <li><span>导入 6 篇 / 25 块</span><b>PASS</b></li>
+          <li><span>混合检索命中 RRF</span><b>PASS</b></li>
+          <li><span>分块查询命中 Top3</span><b>PASS</b></li>
+          <li><span>tag 过滤下推</span><b>PASS</b></li>
+          <li><span>简报含 3 个以上行号引用</span><b>PASS</b></li>
+          <li><span>重复导入幂等</span><b>PASS</b></li>
+          <li><span>Web /healthz</span><b>PASS</b></li>
+          <li><span>pytest 全绿</span><b>PASS</b></li>
+        </ol>
+        <div class="verify-code">
+          <pre><code>python -m readdesk init
+python -m readdesk import samples/library
+python scripts/verify.py</code></pre>
+          <p class="muted">验收使用临时数据目录，不污染仓库；所有查询结果来自真实 seekdb 检索。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="start" class="section start-section">
+      <div>
+        <p class="section-kicker">开始使用</p>
+        <h2>五分钟，在本地跑起来</h2>
+        <p>需要 Linux x86_64、Python 3.12。seekdb 以嵌入式 wheel 安装，无需额外数据库服务。</p>
+      </div>
+      <pre class="quickstart"><code>git clone https://github.com/Aric9/powercontext.git
+cd powercontext/qoder
+python3.12 -m venv .venv &amp;&amp; . .venv/bin/activate
+pip install -r requirements.txt
+python -m readdesk init
+python -m readdesk import samples/library
+python -m readdesk serve --port 8765</code></pre>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div>
+      <strong>研读台 ReadDesk</strong>
+      <p>第六届 OceanBase 数据库大赛 · Qoder 赛道参赛作品</p>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/Aric9/powercontext/tree/qoder/readdesk/qoder" target="_blank" rel="noreferrer">代码仓库</a>
+      <a href="https://github.com/Aric9/powercontext/blob/qoder/readdesk/qoder/README.md" target="_blank" rel="noreferrer">运行说明</a>
+      <a href="https://github.com/Aric9/powercontext/tree/qoder/readdesk/qoder/qoder-dev" target="_blank" rel="noreferrer">Qoder 开发记录</a>
+    </div>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

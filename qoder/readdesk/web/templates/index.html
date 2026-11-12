@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="hero">
+    <h1>本地优先的科研阅读与证据检索工作台</h1>
+    <p>把 Markdown/TXT 笔记导入本地 seekdb，混合检索找到可引用的原句，一键生成带 <code>文件#行号</code> 的证据简报。</p>
+  </section>
+
+  <section class="stats">
+    <div class="stat"><span class="num">{{ docs }}</span><span class="label">文档</span></div>
+    <div class="stat"><span class="num">{{ chunks }}</span><span class="label">证据块</span></div>
+    <div class="stat"><span class="num">{{ tags | length }}</span><span class="label">标签</span></div>
+    <div class="stat"><span class="num">{{ years | length }}</span><span class="label">年份</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>检索</h2>
+    <form action="/search" method="get" class="filter-form">
+      <input type="text" name="q" placeholder="例如：混合检索 怎么融合 BM25 和向量结果" required>
+      <select name="tag" aria-label="标签过滤">
+        <option value="">全部标签</option>
+        {% for t in tags %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+      <select name="year" aria-label="年份过滤">
+        <option value="">全部年份</option>
+        {% for y in years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}
+      </select>
+      <button type="submit">开始检索</button>
+    </form>
+    <p class="samples">示例查询：
+      {% for s in samples %}
+        <a href="/search?q={{ s | urlencode }}">{{ s }}</a>{% if not loop.last %} ·{% endif %}
+      {% endfor %}
+    </p>
+  </section>
+
+  {% if documents %}
+  <section class="panel">
+    <h2>文档库（{{ documents | length }} 篇）</h2>
+    <ul class="doclist">
+      {% for d in documents %}
+      <li>
+        <a href="/doc/{{ d.doc_id }}">{{ d.title }}</a>
+        <span class="muted">{{ d.path }} · {{ d.year if d.year else '年份未知' }}</span>
+        <span class="tags">{% for t in d.tags_csv.split(',') if t %}<a class="tag" href="/search?q={{ d.title | urlencode }}&tag={{ t | urlencode }}">{{ t }}</a>{% endfor %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% else %}
+  <section class="panel empty-state">
+    <h2>文档库为空</h2>
+    <p>请先导入笔记：<code>python -m readdesk import samples/library</code></p>
+  </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>生成证据简报</h2>
+    <form action="/brief" method="post" class="filter-form">
+      <input type="text" name="topic" placeholder="简报主题，例如：混合检索 分块 引用" required>
+      <button type="submit">生成简报</button>
+    </form>
+  </section>
+{% endblock %}

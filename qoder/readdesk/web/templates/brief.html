@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}简报：{{ name }} — ReadDesk{% endblock %}
+{% block content %}
+  <section class="panel brief-actions">
+    <a class="btn" href="/brief-file/{{ name }}">下载 Markdown 源文件</a>
+    <span class="muted">{{ name }}</span>
+  </section>
+  <article class="panel brief-body">
+    {{ body | safe }}
+  </article>
+{% endblock %}

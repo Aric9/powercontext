@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ meta.title }} — ReadDesk{% endblock %}
+{% block content %}
+  <section class="panel">
+    <h1>{{ meta.title }}</h1>
+    <table class="tbl meta-tbl">
+      <tr><td>doc_id</td><td><code>{{ doc_id }}</code></td></tr>
+      <tr><td>路径</td><td><code>{{ meta.path }}</code></td></tr>
+      <tr><td>作者</td><td>{{ meta.authors_csv or '—' }}</td></tr>
+      <tr><td>年份</td><td>{{ meta.year if meta.year else '—' }}</td></tr>
+      <tr><td>标签</td><td>{% for t in meta.tags_csv.split(',') if t %}<a class="tag" href="/search?q={{ meta.title | urlencode }}&tag={{ t | urlencode }}">{{ t }}</a>{% endfor %}</td></tr>
+      <tr><td>出处</td><td>{{ meta.venue or '—' }}</td></tr>
+      <tr><td>DOI</td><td>{{ meta.doi or '—' }}</td></tr>
+      <tr><td>sha256</td><td><code>{{ meta.sha256 }}</code></td></tr>
+      <tr><td>导入时间</td><td>{{ meta.imported_at }}</td></tr>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>证据块（共 {{ blocks | length }} 块）</h2>
+    <ol class="blocks">
+      {% for b in blocks %}
+      <li>
+        <p class="meta"><strong>{{ b.section }}</strong> · <code>{{ b.citation }}</code>
+          <button type="button" class="copy-btn" data-copy="{{ b.citation }}">复制引用</button></p>
+        <pre class="blocktext">{{ b.text }}</pre>
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+{% endblock %}

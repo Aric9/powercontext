@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}出错了 — ReadDesk{% endblock %}
+{% block content %}
+  <section class="panel error-state">
+    <h1>操作未完成</h1>
+    <p>{{ message }}</p>
+    <p><a href="/">← 返回首页</a>　<a href="/search?q={{ q | urlencode }}">重试检索</a></p>
+  </section>
+{% endblock %}
