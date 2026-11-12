@@ -13,7 +13,7 @@
 要求 **Linux x86_64 + Python 3.12**（seekdb 仅提供 manylinux wheel；本机不附带 `.venv`）：
 
 ```bash
-git clone https://github.com/Aric9/powercontext.git
+git clone -b qoder/readdesk https://github.com/Aric9/powercontext.git
 cd powercontext/qoder
 python3.12 -m venv .venv
 . .venv/bin/activate
