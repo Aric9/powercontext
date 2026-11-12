@@ -1,0 +1,26 @@
+{
+  "task_id": "S1-refund-cap",
+  "title": "退款累计上限与金额 half-up 舍入",
+  "request": "退款服务需要支持同一订单的累计退款上限，并按商业舍入规则处理金额。当前实现只校验单笔退款金额，同一订单的第二次退款可以超过订单已支付金额；订单发货超过 7 天后的 90% 退款使用了银行家舍入，金额 90.045 被算成 90.04。请修改 business/refund/service.py：累计成功退款金额（含服务费扣减后的实际退款额）不得超过订单已支付金额，超出时整笔拒绝并返回 reason_code=exceeds_refundable；金额统一使用 half-up 保留两位小数。不得改变幂等、单笔上限、非法金额与全额退款的既有行为。",
+  "change_scope": [
+    "business/refund/service.py"
+  ],
+  "target_tests": [
+    "business/tests/test_refund_target.py"
+  ],
+  "regression_tests": [
+    "business/tests/test_refund_regression.py"
+  ],
+  "must_keep": [
+    "REF-005 相同 request_id 重复提交返回首次结果，不重复扣减，也不新增记录",
+    "REF-002 单笔退款金额超过已支付金额时返回 exceeds_paid",
+    "REF-007 退款金额小于等于 0 时返回 invalid_amount",
+    "REF-001 未发货且在 7 天内全额退款，金额等于已支付金额",
+    "REF-004 未超过 7 天（含第 7 天）不扣服务费"
+  ],
+  "acceptance": [
+    "目标测试在修改前失败、修改后通过",
+    "回归测试在修改前后均通过",
+    "上下文必须引用真实存在的规格条款、代码符号与测试"
+  ]
+}

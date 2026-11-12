@@ -1,0 +1,57 @@
+--- a/business/refund/service.py
++++ b/business/refund/service.py
+@@ -10,7 +10,7 @@
+ from decimal import Decimal
+ 
+ from business.refund.models import Order, OrderLedger, RefundRequest, RefundResult
+-from business.refund.money import to_decimal
++from business.refund.money import round_money, to_decimal
+ 
+ SERVICE_FEE_RATE = Decimal("0.90")
+ SERVICE_FEE_DAYS = 7
+@@ -32,7 +32,8 @@
+         """Refund ``request.amount`` for ``order``.
+ 
+         Implements REF-001 (full refund), REF-002 (single-request cap),
+-        REF-004 (service fee), REF-005 (idempotency) and REF-007 (invalid input).
++        REF-003 (cumulative cap), REF-004 (service fee), REF-005 (idempotency),
++        REF-006 (money precision), and REF-007 (invalid input).
+         """
+ 
+         # REF-005: a repeated request id returns the first outcome unchanged.
+@@ -41,18 +42,33 @@
+             return existing
+ 
+         amount = to_decimal(request.amount)
++        paid_amount = to_decimal(order.paid_amount)
+ 
+         if amount <= Decimal("0"):
+             return self._reject(order, request, "invalid_amount", "refund amount must be positive")
+ 
+-        if amount > order.paid_amount:
++        if amount > paid_amount:
+             return self._reject(order, request, "exceeds_paid", "refund amount exceeds paid amount")
+ 
+         if order.shipped_at is not None:
+             age_days = (self._now(now) - order.shipped_at).days
+             if age_days > SERVICE_FEE_DAYS:
+                 # REF-004: 10% service fee after the return window.
+-                amount = round(amount * SERVICE_FEE_RATE, 2)
++                amount = round_money(amount * SERVICE_FEE_RATE)
++            else:
++                amount = round_money(amount)
++        else:
++            amount = round_money(amount)
++
++        # REF-003: compare the actual post-fee amount with all successful refunds
++        # for this order. A rejected request is never added to this total.
++        if self.refunded_total(order.order_id) + amount > paid_amount:
++            return self._reject(
++                order,
++                request,
++                "exceeds_refundable",
++                "refund amount exceeds remaining refundable amount",
++            )
+ 
+         result = RefundResult(
+             request_id=request.request_id,

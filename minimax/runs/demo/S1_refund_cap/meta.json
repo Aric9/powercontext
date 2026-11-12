@@ -1,0 +1,56 @@
+{
+  "provider": "MiniMax",
+  "model": "MiniMax-M3",
+  "endpoint": "https://api.minimaxi.com/v1",
+  "started_at": "20261112T061057Z",
+  "latency_seconds": 31.07,
+  "attempts": 1,
+  "usage": {
+    "prompt_tokens": 3366,
+    "completion_tokens": 4545,
+    "total_tokens": 7911
+  },
+  "changed_files": [
+    "business/refund/service.py"
+  ],
+  "returned_files": [
+    "business/refund/service.py"
+  ],
+  "rationale": [
+    {
+      "clause_id": "REF-003",
+      "why": "在计算服务费后的实际退款金额后，与该订单已成功退款的累计金额求和；超过已支付金额时以 exceeds_refundable 整笔拒绝，拒绝结果不计入累计成功退款额。"
+    },
+    {
+      "clause_id": "REF-006",
+      "why": "使用已有 money.round_money 对最终退款金额执行 half-up 两位小数舍入，替代 Python round 的银行家舍入。"
+    },
+    {
+      "clause_id": "REF-005",
+      "why": "幂等查询仍位于所有金额和时间校验之前，重复 request_id 直接返回首次结果。"
+    },
+    {
+      "clause_id": "REF-002",
+      "why": "保留单笔申请金额与订单已支付金额的比较及 exceeds_paid 拒绝行为。"
+    },
+    {
+      "clause_id": "REF-007",
+      "why": "保留非正退款金额的 invalid_amount 整笔拒绝行为。"
+    },
+    {
+      "clause_id": "REF-001",
+      "why": "未发货且处于七天窗口内的全额退款仍按申请金额成功退款，最终金额仅按金额精度规范舍入。"
+    },
+    {
+      "clause_id": "REF-004",
+      "why": "发货超过七个自然日时仍按申请金额的 90% 计算实际退款额，七天及以内不扣服务费。"
+    }
+  ],
+  "summary": "增加按订单累计实际退款额校验，并统一使用 Decimal half-up 舍入到两位小数。",
+  "verification": [
+    "运行 pytest business/tests/test_refund_regression.py business/tests/test_refund_target.py",
+    "验证连续退款 54.00 后再申请 54.00 会返回 rejected 且 reason_code=exceeds_refundable。",
+    "验证被拒绝的累计超限退款不会占用余额，后续实际退款 45.00 可以成功。",
+    "验证服务费场景下 100.05 按 90% 计算并舍入为 90.05，而非 90.04。"
+  ]
+}

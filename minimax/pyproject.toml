@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sdd-context"
+version = "0.1.0"
+description = "Spec-driven development context module backed by seekdb and PowerContext"
+requires-python = ">=3.12"
+dependencies = [
+    "pyseekdb==1.4.0.post1",
+    "seekdb==1.4.0.dev2",
+    "powercontext[builtin]==1.5.1",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.32,<1",
+    "httpx>=0.28,<1",
+    "pytest>=8.3,<9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["sdd_context"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

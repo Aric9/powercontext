@@ -1,0 +1,53 @@
+{
+  "schema": "sdd.task_state.v1",
+  "task_id": "S1-refund-cap",
+  "version": 2,
+  "status": "verified",
+  "completed": [
+    "导入规格、代码和测试到 seekdb",
+    "运行基线测试并确认目标用例失败",
+    "由 MiniMax 依据上下文生成代码修改",
+    "目标测试与回归测试全部通过"
+  ],
+  "todos": [],
+  "verified": [
+    "test_cumulative_refunds_cannot_exceed_paid",
+    "test_service_fee_rounds_half_up",
+    "test_rejection_does_not_consume_refundable_balance",
+    "regression suite 5 passed"
+  ],
+  "updated_at": "2026-11-12T06:15:44.656982+00:00",
+  "context_snapshot": {
+    "spec_clauses": [
+      "REF-002",
+      "REF-007",
+      "REF-003",
+      "REF-001",
+      "REF-004",
+      "REF-005",
+      "REF-006"
+    ],
+    "code_symbols": [
+      "RefundService.refund",
+      "RefundService._reject",
+      "round_money",
+      "RefundService._now",
+      "OrderLedger"
+    ],
+    "test_symbols": [
+      "business/tests/test_refund_regression.py::test_negative_amount_is_rejected",
+      "business/tests/test_refund_regression.py::test_single_request_above_paid_is_rejected",
+      "business/tests/test_refund_regression.py::test_full_refund_within_window",
+      "business/tests/test_refund_target.py::test_rejection_does_not_consume_refundable_balance",
+      "business/tests/test_refund_target.py::test_cumulative_refunds_cannot_exceed_paid",
+      "business/tests/test_refund_target.py::test_service_fee_rounds_half_up",
+      "business/tests/test_refund_regression.py::test_duplicate_request_is_idempotent",
+      "business/tests/test_refund_regression.py::test_partial_refund_unshipped"
+    ]
+  },
+  "citation": {
+    "family": "atomic-memory",
+    "artifact_id": "art_af88f706ee3e48e1a2dfdcb0cb29bdac",
+    "revision": 1
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "sample": "S1_refund_cap",
+  "mode": "replay",
+  "run_dir": "runs/demo/S1_refund_cap",
+  "started_at": "2026-11-12T06:15:35.548681+00:00",
+  "steps": {
+    "reset": {
+      "restored": [
+        "business/refund/service.py"
+      ],
+      "data_dir": "/home/zhoupengcheng/sdd-project/.sdd"
+    },
+    "index": {
+      "manifest": {
+        "spec": 8,
+        "code": 20,
+        "test": 8,
+        "total": 36
+      },
+      "stats": {
+        "backend": "seekdb",
+        "collection": "sdd_chunks",
+        "path": "/home/zhoupengcheng/sdd-project/.sdd/seekdb",
+        "dimension": 512,
+        "total": 36,
+        "by_kind": {
+          "spec": 8,
+          "code": 20,
+          "test": 8
+        }
+      }
+    },
+    "powercontext": {
+      "started": true,
+      "pid": 2747333,
+      "url": "http://127.0.0.1:8791"
+    },
+    "tests_before": {
+      "target_passed": false,
+      "regression_passed": true,
+      "target_output_tail": "mal('90.04'), reason_code=None, detail='').amount\nE        +  and   Decimal('90.05') = Decimal('90.05')\n\nbusiness/tests/test_refund_target.py:49: AssertionError\n______________ test_rejection_does_not_consume_refundable_balance ______________\n\n    def test_rejection_does_not_consume_refundable_balance() -> None:  # REF-003\n        service = RefundService()\n        order = make_order(\"100.00\", shipped_days_ago=10)\n    \n        assert service.refund(order, RefundRequest(\"req-x\", Decimal(\"60.00\")), now=NOW).amount == Decimal(\"54.00\")\n        rejected = service.refund(order, RefundRequest(\"req-y\", Decimal(\"60.00\")), now=NOW)\n>       assert rejected.status == \"rejected\"\nE       AssertionError: assert 'succeeded' == 'rejected'\nE         \nE         - rejected\nE         + succeeded\n\nbusiness/tests/test_refund_target.py:58: AssertionError\n=========================== short test summary info ============================\nFAILED business/tests/test_refund_target.py::test_cumulative_refunds_cannot_exceed_paid\nFAILED business/tests/test_refund_target.py::test_service_fee_rounds_half_up\nFAILED business/tests/test_refund_target.py::test_rejection_does_not_consume_refundable_balance\n3 failed in 0.03s"
+    },
+    "context": {
+      "coverage": {
+        "specs": 7,
+        "code": 5,
+        "tests": 8,
+        "state_restored": true,
+        "all_sources_verified": true
+      },
+      "clauses": [
+        "REF-002",
+        "REF-007",
+        "REF-003",
+        "REF-001",
+        "REF-004",
+        "REF-005",
+        "REF-006"
+      ],
+      "symbols": [
+        "RefundService.refund",
+        "RefundService._reject",
+        "round_money",
+        "RefundService._now",
+        "OrderLedger"
+      ],
+      "tests": [
+        "business/tests/test_refund_regression.py::test_negative_amount_is_rejected",
+        "business/tests/test_refund_regression.py::test_single_request_above_paid_is_rejected",
+        "business/tests/test_refund_regression.py::test_full_refund_within_window",
+        "business/tests/test_refund_target.py::test_rejection_does_not_consume_refundable_balance",
+        "business/tests/test_refund_target.py::test_cumulative_refunds_cannot_exceed_paid",
+        "business/tests/test_refund_target.py::test_service_fee_rounds_half_up",
+        "business/tests/test_refund_regression.py::test_duplicate_request_is_idempotent",
+        "business/tests/test_refund_regression.py::test_partial_refund_unshipped"
+      ],
+      "constraints": 5,
+      "state_restored": true
+    },
+    "minimax": {
+      "mode": "replay",
+      "source": "/home/zhoupengcheng/sdd-project/runs/recorded/S1_refund_cap",
+      "meta": {
+        "provider": "MiniMax",
+        "model": "MiniMax-M3",
+        "endpoint": "https://api.minimaxi.com/v1",
+        "started_at": "20261112T061057Z",
+        "latency_seconds": 31.07,
+        "attempts": 1,
+        "usage": {
+          "prompt_tokens": 3366,
+          "completion_tokens": 4545,
+          "total_tokens": 7911
+        },
+        "changed_files": [
+          "business/refund/service.py"
+        ],
+        "returned_files": [
+          "business/refund/service.py"
+        ],
+        "rationale": [
+          {
+            "clause_id": "REF-003",
+            "why": "在计算服务费后的实际退款金额后，与该订单已成功退款的累计金额求和；超过已支付金额时以 exceeds_refundable 整笔拒绝，拒绝结果不计入累计成功退款额。"
+          },
+          {
+            "clause_id": "REF-006",
+            "why": "使用已有 money.round_money 对最终退款金额执行 half-up 两位小数舍入，替代 Python round 的银行家舍入。"
+          },
+          {
+            "clause_id": "REF-005",
+            "why": "幂等查询仍位于所有金额和时间校验之前，重复 request_id 直接返回首次结果。"
+          },
+          {
+            "clause_id": "REF-002",
+            "why": "保留单笔申请金额与订单已支付金额的比较及 exceeds_paid 拒绝行为。"
+          },
+          {
+            "clause_id": "REF-007",
+            "why": "保留非正退款金额的 invalid_amount 整笔拒绝行为。"
+          },
+          {
+            "clause_id": "REF-001",
+            "why": "未发货且处于七天窗口内的全额退款仍按申请金额成功退款，最终金额仅按金额精度规范舍入。"
+          },
+          {
+            "clause_id": "REF-004",
+            "why": "发货超过七个自然日时仍按申请金额的 90% 计算实际退款额，七天及以内不扣服务费。"
+          }
+        ],
+        "summary": "增加按订单累计实际退款额校验，并统一使用 Decimal half-up 舍入到两位小数。",
+        "verification": [
+          "运行 pytest business/tests/test_refund_regression.py business/tests/test_refund_target.py",
+          "验证连续退款 54.00 后再申请 54.00 会返回 rejected 且 reason_code=exceeds_refundable。",
+          "验证被拒绝的累计超限退款不会占用余额，后续实际退款 45.00 可以成功。",
+          "验证服务费场景下 100.05 按 90% 计算并舍入为 90.05，而非 90.04。"
+        ]
+      }
+    },
+    "apply": {
+      "written": [
+        "business/refund/service.py"
+      ]
+    },
+    "tests_after": {
+      "target_passed": true,
+      "regression_passed": true,
+      "target_output_tail": "...                                                                      [100%]\n3 passed in 0.01s"
+    },
+    "state_restart": {
+      "restarted": {
+        "started": true,
+        "pid": 2749335,
+        "url": "http://127.0.0.1:8791"
+      },
+      "version": 2,
+      "status": "verified",
+      "restored_in_context": true
+    }
+  },
+  "finished_at": "2026-11-12T06:16:19.301674+00:00",
+  "summary": {
+    "imported_chunks": 36,
+    "spec_clauses": [
+      "REF-002",
+      "REF-007",
+      "REF-003",
+      "REF-001",
+      "REF-004",
+      "REF-005",
+      "REF-006"
+    ],
+    "code_symbols": [
+      "RefundService.refund",
+      "RefundService._reject",
+      "round_money",
+      "RefundService._now",
+      "OrderLedger"
+    ],
+    "target_passed_before": false,
+    "target_passed_after": true,
+    "regression_passed": true,
+    "state_versions": [
+      1,
+      2
+    ],
+    "minimax_model": "MiniMax-M3"
+  }
+}

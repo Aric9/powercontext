@@ -1,0 +1,19 @@
+{
+  "sample": "S1_refund_cap",
+  "required_clause_ids": [
+    "REF-003",
+    "REF-006",
+    "REF-002"
+  ],
+  "required_symbols": [
+    "RefundService.refund",
+    "round_money"
+  ],
+  "required_test_symbols": [
+    "test_cumulative_refunds_cannot_exceed_paid",
+    "test_service_fee_rounds_half_up"
+  ],
+  "forbidden_symbols": [
+    "RefundService._reject"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "summary": "增加按订单累计实际退款额校验，并统一使用 Decimal half-up 舍入到两位小数。",
+  "rationale": [
+    {
+      "clause_id": "REF-003",
+      "why": "在计算服务费后的实际退款金额后，与该订单已成功退款的累计金额求和；超过已支付金额时以 exceeds_refundable 整笔拒绝，拒绝结果不计入累计成功退款额。"
+    },
+    {
+      "clause_id": "REF-006",
+      "why": "使用已有 money.round_money 对最终退款金额执行 half-up 两位小数舍入，替代 Python round 的银行家舍入。"
+    },
+    {
+      "clause_id": "REF-005",
+      "why": "幂等查询仍位于所有金额和时间校验之前，重复 request_id 直接返回首次结果。"
+    },
+    {
+      "clause_id": "REF-002",
+      "why": "保留单笔申请金额与订单已支付金额的比较及 exceeds_paid 拒绝行为。"
+    },
+    {
+      "clause_id": "REF-007",
+      "why": "保留非正退款金额的 invalid_amount 整笔拒绝行为。"
+    },
+    {
+      "clause_id": "REF-001",
+      "why": "未发货且处于七天窗口内的全额退款仍按申请金额成功退款，最终金额仅按金额精度规范舍入。"
+    },
+    {
+      "clause_id": "REF-004",
+      "why": "发货超过七个自然日时仍按申请金额的 90% 计算实际退款额，七天及以内不扣服务费。"
+    }
+  ],
+  "files": [
+    {
+      "path": "business/refund/service.py",
+      "content": "\"\"\"Refund service implementation.\n\nThe service is intentionally small: one command object in, one immutable result\nout, with an in-memory ledger.  Behaviour follows ``business/specs/refund-policy.md``.\n\"\"\"\n\nfrom __future__ import annotations\n\nfrom datetime import datetime, timezone\nfrom decimal import Decimal\n\nfrom business.refund.models import Order, OrderLedger, RefundRequest, RefundResult\nfrom business.refund.money import round_money, to_decimal\n\nSERVICE_FEE_RATE = Decimal(\"0.90\")\nSERVICE_FEE_DAYS = 7\n\n\nclass RefundService:\n    \"\"\"Apply refund commands against orders and keep a ledger.\"\"\"\n\n    def __init__(self) -> None:\n        self.ledger = OrderLedger()\n\n    # ------------------------------------------------------------------ public\n    def refund(\n        self,\n        order: Order,\n        request: RefundRequest,\n        now: datetime | None = None,\n    ) -> RefundResult:\n        \"\"\"Refund ``request.amount`` for ``order``.\n\n        Implements REF-001 (full refund), REF-002 (single-request cap),\n        REF-003 (cumulative cap), REF-004 (service fee), REF-005 (idempotency),\n        REF-006 (money precision), and REF-007 (invalid input).\n        \"\"\"\n\n        # REF-005: a repeated request id returns the first outcome unchanged.\n        existing = self.ledger.refunds.get(request.request_id)\n        if existing is not None:\n            return existing\n\n        amount = to_decimal(request.amount)\n        paid_amount = to_decimal(order.paid_amount)\n\n        if amount <= Decimal(\"0\"):\n            return self._reject(order, request, \"invalid_amount\", \"refund amount must be positive\")\n\n        if amount > paid_amount:\n            return self._reject(order, request, \"exceeds_paid\", \"refund amount exceeds paid amount\")\n\n        if order.shipped_at is not None:\n            age_days = (self._now(now) - order.shipped_at).days\n            if age_days > SERVICE_FEE_DAYS:\n                # REF-004: 10% service fee after the return window.\n                amount = round_money(amount * SERVICE_FEE_RATE)\n            else:\n                amount = round_money(amount)\n        else:\n            amount = round_money(amount)\n\n        # REF-003: compare the actual post-fee amount with all successful refunds\n        # for this order. A rejected request is never added to this total.\n        if self.refunded_total(order.order_id) + amount > paid_amount:\n            return self._reject(\n                order,\n                request,\n                \"exceeds_refundable\",\n                \"refund amount exceeds remaining refundable amount\",\n            )\n\n        result = RefundResult(\n            request_id=request.request_id,\n            order_id=order.order_id,\n            status=\"succeeded\",\n            amount=amount,\n        )\n        self.ledger.record(result)\n        return result\n\n    def refunded_total(self, order_id: str) -> Decimal:\n        \"\"\"Total successfully refunded amount for one order.\"\"\"\n\n        return self.ledger.succeeded_total(order_id)\n\n    # ----------------------------------------------------------------- private\n    def _reject(self, order: Order, request: RefundRequest, code: str, detail: str) -> RefundResult:\n        result = RefundResult(\n            request_id=request.request_id,\n            order_id=order.order_id,\n            status=\"rejected\",\n            amount=Decimal(\"0.00\"),\n            reason_code=code,\n            detail=detail,\n        )\n        self.ledger.record(result)\n        return result\n\n    @staticmethod\n    def _now(now: datetime | None) -> datetime:\n        if now is None:\n            return datetime.now(timezone.utc)\n        if now.tzinfo is None:\n            return now.replace(tzinfo=timezone.utc)\n        return now\n"
+    }
+  ],
+  "verification": [
+    "运行 pytest business/tests/test_refund_regression.py business/tests/test_refund_target.py",
+    "验证连续退款 54.00 后再申请 54.00 会返回 rejected 且 reason_code=exceeds_refundable。",
+    "验证被拒绝的累计超限退款不会占用余额，后续实际退款 45.00 可以成功。",
+    "验证服务费场景下 100.05 按 90% 计算并舍入为 90.05，而非 90.04。"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "sdd.task_state.v1",
+  "task_id": "S1-refund-cap",
+  "version": 1,
+  "status": "in_progress",
+  "completed": [
+    "导入规格、代码和测试到 seekdb",
+    "运行基线测试并确认目标用例失败"
+  ],
+  "todos": [
+    "修复累计退款上限",
+    "改为 half-up 金额舍入",
+    "运行回归测试并保存验证结果"
+  ],
+  "verified": [],
+  "updated_at": "2026-11-12T06:15:43.099085+00:00",
+  "context_snapshot": {
+    "spec_clauses": [],
+    "code_symbols": [],
+    "test_symbols": []
+  },
+  "citation": {
+    "family": "atomic-memory",
+    "artifact_id": "art_787aff74481f4d1e92453097f662fc24",
+    "revision": 1
+  }
+}

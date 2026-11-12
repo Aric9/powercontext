@@ -1,0 +1,9 @@
+# Runtime data and local caches
+.sdd/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Local secrets
+.env
+.minimax_key
