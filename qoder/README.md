@@ -39,6 +39,7 @@ pip install -r requirements.txt
 ```
 
 - 支持 UTF-8 的 `.md`/`.txt`，忽略隐藏文件与 `.readdesk` 目录。
+- `samples/library/` 是演示用的**合成笔记**（非真实论文），用于复现检索与验收；替换成自己的笔记即可。
 - 解析文件开头的 `---` front matter：`title`、`authors`、`year`、`tags`、`venue`、`doi`；缺省标题取文件名。
 - 按 `#`/`##`/`###` 标题分块，超长章节按段落切到 600–900 字符、重叠 ≤120 字符；每块记录 1-based 闭区间起止行号。
 - **幂等**：同一文件内容（sha256）不变时重复导入不会新增块（输出 `[skipped]`）；内容变化则整体替换该文档的块（`[updated]`）。
